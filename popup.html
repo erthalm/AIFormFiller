@@ -72,7 +72,8 @@
       margin-bottom: 4px;
     }
 
-    input {
+    input,
+    select {
       width: 100%;
       padding: 8px;
       border: 1px solid var(--border);
@@ -104,6 +105,30 @@
     button.secondary {
       background: #e8eef5;
       color: var(--text);
+    }
+
+    button.danger {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .section {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: #fbfdff;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 8px;
     }
 
     #status {
@@ -146,6 +171,43 @@
       color: var(--muted);
       margin-top: 6px;
     }
+
+    .file-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .file-item {
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .file-item:last-child {
+      border-bottom: none;
+    }
+
+    .file-title {
+      font-weight: 600;
+      margin-bottom: 3px;
+      word-break: break-word;
+    }
+
+    .file-meta {
+      color: var(--muted);
+      margin-bottom: 6px;
+      word-break: break-all;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 6px;
+    }
   </style>
 </head>
 <body>
@@ -153,8 +215,14 @@
     <div class="card">
       <h1>AI Form Filler</h1>
       <div id="configSummary"></div>
+      <label for="vectorStoreId" style="margin-top:8px;">File Database</label>
+      <div class="actions" style="margin-top:0;">
+        <select id="vectorStoreId" style="margin-bottom:0; flex:1;"></select>
+        <button class="secondary" id="refreshStoresBtn" type="button">Refresh</button>
+      </div>
       <div class="stack">
         <button class="primary" id="fillBtn" type="button">Fill Current Form</button>
+        <button class="secondary" id="openFilesBtn" type="button">Files</button>
         <button class="secondary" id="openSettingsBtn" type="button">Configuration</button>
       </div>
       <div id="status"></div>
@@ -174,11 +242,29 @@
       <label for="apiKey">OpenAI API Key</label>
       <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
 
-      <label for="vectorStoreId">Vector Store ID</label>
-      <input id="vectorStoreId" type="text" placeholder="vs_..." autocomplete="off" />
+      <div class="section">
+        <div class="section-title">Create Database</div>
+        <div class="actions" style="margin-top:0;">
+          <input id="newStoreName" type="text" placeholder="New file database name" style="margin-bottom:0; flex:1;" />
+          <button class="secondary" id="createStoreBtn" type="button">Create</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Delete Database</div>
+        <div class="small" style="margin-top:0;">Deletes the selected database and all files inside it.</div>
+        <div class="actions" style="margin-top:8px;">
+          <button class="danger" id="deleteStoreBtn" type="button">Delete Selected Database</button>
+        </div>
+      </div>
 
       <label for="model">Model</label>
-      <input id="model" type="text" value="gpt-4.1-mini" autocomplete="off" />
+      <select id="model">
+        <option value="gpt-4.1-mini">gpt-4.1-mini (Recommended)</option>
+        <option value="gpt-4.1">gpt-4.1</option>
+        <option value="gpt-4o-mini">gpt-4o-mini</option>
+        <option value="gpt-4o">gpt-4o</option>
+      </select>
 
       <div class="actions">
         <button class="secondary" id="backBtn" type="button">Back</button>
@@ -186,6 +272,30 @@
       </div>
 
       <div class="small">Stored locally with Chrome extension storage.</div>
+    </div>
+  </div>
+
+  <div id="filesView" class="view">
+    <div class="card">
+      <h1>Files</h1>
+
+      <label for="newFileInput">Add File</label>
+      <input id="newFileInput" type="file" />
+
+      <div class="actions">
+        <button class="secondary" id="filesBackBtn" type="button">Back</button>
+        <button class="secondary" id="refreshFilesBtn" type="button">Refresh</button>
+        <button class="primary" id="uploadFileBtn" type="button">Upload</button>
+      </div>
+
+      <div id="filesStatus" class="small"></div>
+      <input id="replaceFileInput" type="file" style="display:none;" />
+    </div>
+
+    <div class="card">
+      <strong style="font-size: 13px;">Current Files</strong>
+      <ul id="filesList" class="file-list"></ul>
+      <div class="hint">Update = replace file with a new version.</div>
     </div>
   </div>
 

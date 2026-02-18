@@ -1,23 +1,50 @@
 ﻿const SETTINGS_KEY = "aiFormFillerSettings";
+const CRYPTO_KEY_KEY = "aiFormFillerCryptoKey";
 
 const ui = {
   actionsView: document.getElementById("actionsView"),
   settingsView: document.getElementById("settingsView"),
+  filesView: document.getElementById("filesView"),
+
   configSummary: document.getElementById("configSummary"),
+
   apiKey: document.getElementById("apiKey"),
   vectorStoreId: document.getElementById("vectorStoreId"),
+  refreshStoresBtn: document.getElementById("refreshStoresBtn"),
+  newStoreName: document.getElementById("newStoreName"),
+  createStoreBtn: document.getElementById("createStoreBtn"),
+  deleteStoreBtn: document.getElementById("deleteStoreBtn"),
   model: document.getElementById("model"),
+
   saveBtn: document.getElementById("saveBtn"),
   backBtn: document.getElementById("backBtn"),
   openSettingsBtn: document.getElementById("openSettingsBtn"),
+  openFilesBtn: document.getElementById("openFilesBtn"),
   fillBtn: document.getElementById("fillBtn"),
+
   status: document.getElementById("status"),
-  log: document.getElementById("log")
+  log: document.getElementById("log"),
+
+  filesBackBtn: document.getElementById("filesBackBtn"),
+  refreshFilesBtn: document.getElementById("refreshFilesBtn"),
+  uploadFileBtn: document.getElementById("uploadFileBtn"),
+  newFileInput: document.getElementById("newFileInput"),
+  replaceFileInput: document.getElementById("replaceFileInput"),
+  filesStatus: document.getElementById("filesStatus"),
+  filesList: document.getElementById("filesList")
 };
+
+let pendingReplaceFileId = null;
+let cachedVectorStores = [];
 
 function setStatus(message, isError) {
   ui.status.textContent = message;
   ui.status.classList.toggle("error", Boolean(isError));
+}
+
+function setFilesStatus(message, isError) {
+  ui.filesStatus.textContent = message;
+  ui.filesStatus.style.color = isError ? "#b91c1c" : "#6b7280";
 }
 
 function appendLog(message) {
@@ -32,9 +59,26 @@ function clearLog() {
 }
 
 function switchView(view) {
-  const actionsActive = view === "actions";
-  ui.actionsView.classList.toggle("active", actionsActive);
-  ui.settingsView.classList.toggle("active", !actionsActive);
+  ui.actionsView.classList.toggle("active", view === "actions");
+  ui.settingsView.classList.toggle("active", view === "settings");
+  ui.filesView.classList.toggle("active", view === "files");
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 async function getSettings() {
@@ -42,8 +86,47 @@ async function getSettings() {
   return data[SETTINGS_KEY] || {};
 }
 
+async function getOrCreateCryptoKeyRaw() {
+  const data = await chrome.storage.local.get([CRYPTO_KEY_KEY]);
+  if (data[CRYPTO_KEY_KEY]) {
+    return data[CRYPTO_KEY_KEY];
+  }
+
+  const keyBytes = new Uint8Array(32);
+  crypto.getRandomValues(keyBytes);
+  const raw = bytesToBase64(keyBytes);
+  await chrome.storage.local.set({ [CRYPTO_KEY_KEY]: raw });
+  return raw;
+}
+
+async function importAesKeyFromRaw(rawBase64) {
+  const keyBytes = base64ToBytes(rawBase64);
+  return crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptApiKey(plainApiKey) {
+  const keyRaw = await getOrCreateCryptoKeyRaw();
+  const aesKey = await importAesKeyFromRaw(keyRaw);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const payload = new TextEncoder().encode(plainApiKey);
+
+  const cipherBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, payload);
+
+  return {
+    v: 1,
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(cipherBuffer))
+  };
+}
+
+function hasConfiguredApiKey(settings) {
+  const hasEncrypted = Boolean(settings.apiKeyEncrypted && settings.apiKeyEncrypted.ciphertext && settings.apiKeyEncrypted.iv);
+  const hasLegacyPlain = Boolean(settings.apiKey && settings.apiKey.trim());
+  return hasEncrypted || hasLegacyPlain;
+}
+
 function summarizeConfig(settings) {
-  const hasKey = Boolean(settings.apiKey && settings.apiKey.trim());
+  const hasKey = hasConfiguredApiKey(settings);
   const hasStore = Boolean(settings.vectorStoreId && settings.vectorStoreId.trim());
   const model = settings.model || "gpt-4.1-mini";
 
@@ -54,41 +137,209 @@ function summarizeConfig(settings) {
   return "Not fully configured. Open Configuration.";
 }
 
+function updateStoreActionsState() {
+  const hasSelection = Boolean((ui.vectorStoreId.value || "").trim());
+  ui.deleteStoreBtn.disabled = !hasSelection;
+  ui.fillBtn.disabled = !hasSelection;
+  ui.openFilesBtn.disabled = !hasSelection;
+}
+
 async function loadSettings() {
   const settings = await getSettings();
-  ui.apiKey.value = settings.apiKey || "";
-  ui.vectorStoreId.value = settings.vectorStoreId || "";
+  ui.apiKey.value = "";
+  ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
   ui.model.value = settings.model || "gpt-4.1-mini";
   ui.configSummary.textContent = summarizeConfig(settings);
+  await refreshVectorStores(settings.vectorStoreId || "");
+}
+
+function populateVectorStoreSelect(stores, selectedId) {
+  ui.vectorStoreId.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = stores.length ? "Select a file database..." : "No file databases available";
+  ui.vectorStoreId.appendChild(placeholder);
+
+  stores.forEach((store) => {
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name || "Unnamed file database";
+    ui.vectorStoreId.appendChild(option);
+  });
+
+  if (selectedId && !stores.some((store) => store.id === selectedId)) {
+    const fallback = document.createElement("option");
+    fallback.value = selectedId;
+    fallback.textContent = "Previously selected vector store";
+    ui.vectorStoreId.appendChild(fallback);
+  }
+
+  ui.vectorStoreId.value = selectedId || "";
+  updateStoreActionsState();
+}
+
+async function refreshVectorStores(selectedId) {
+  const settings = await getSettings();
+  const preferredId = selectedId || settings.vectorStoreId || "";
+
+  if (!hasConfiguredApiKey(settings)) {
+    cachedVectorStores = [];
+    populateVectorStoreSelect([], preferredId);
+    return;
+  }
+
+  try {
+    const response = await runtimeSendMessage({ type: "VECTOR_STORES_LIST" });
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Could not load file databases.");
+    }
+
+    cachedVectorStores = Array.isArray(response.vectorStores) ? response.vectorStores : [];
+    populateVectorStoreSelect(cachedVectorStores, preferredId);
+  } catch (error) {
+    cachedVectorStores = [];
+    populateVectorStoreSelect([], preferredId);
+    setStatus((error && error.message) || "Could not load file databases.", true);
+  }
+}
+
+async function createVectorStore() {
+  const name = (ui.newStoreName.value || "").trim();
+  if (!name) {
+    throw new Error("Enter a name for the new file database.");
+  }
+
+  const response = await runtimeSendMessage({
+    type: "VECTOR_STORES_CREATE",
+    name
+  });
+
+  if (!response || !response.ok) {
+    throw new Error((response && response.error) || "Could not create file database.");
+  }
+
+  ui.newStoreName.value = "";
+  await refreshVectorStores(response.vectorStoreId || "");
+  if (response.vectorStoreId) {
+    ui.vectorStoreId.value = response.vectorStoreId;
+  }
+  setStatus("File database created.", false);
+}
+
+async function persistSelectedVectorStore(selectedStoreId) {
+  const settings = await getSettings();
+  const selectedId = (selectedStoreId || "").trim();
+  const selectedStore = cachedVectorStores.find((store) => store.id === selectedId);
+
+  const updatedSettings = {
+    ...settings,
+    vectorStoreId: selectedId,
+    vectorStoreName: selectedStore ? (selectedStore.name || "") : ""
+  };
+
+  await chrome.storage.local.set({ [SETTINGS_KEY]: updatedSettings });
+  ui.configSummary.textContent = summarizeConfig(updatedSettings);
+}
+
+async function clearStoredVectorStoreIfMatches(storeId) {
+  const settings = await getSettings();
+  if ((settings.vectorStoreId || "") !== (storeId || "")) {
+    return;
+  }
+
+  const updatedSettings = {
+    ...settings,
+    vectorStoreId: "",
+    vectorStoreName: ""
+  };
+  await chrome.storage.local.set({ [SETTINGS_KEY]: updatedSettings });
+  ui.configSummary.textContent = summarizeConfig(updatedSettings);
+}
+
+async function deleteSelectedVectorStore() {
+  const selectedStoreId = (ui.vectorStoreId.value || "").trim();
+  if (!selectedStoreId) {
+    throw new Error("Select a file database first.");
+  }
+
+  const selectedOption = ui.vectorStoreId.options[ui.vectorStoreId.selectedIndex];
+  const selectedStoreName = (selectedOption && selectedOption.textContent) || "selected file database";
+
+  const preview = await runtimeSendMessage({
+    type: "VECTOR_STORE_DELETE_PREVIEW",
+    vectorStoreId: selectedStoreId
+  });
+  if (!preview || !preview.ok) {
+    throw new Error((preview && preview.error) || "Could not preview deletion.");
+  }
+
+  const fileCount = Number(preview.fileCount || 0);
+  if (fileCount > 0) {
+    const shouldDelete = window.confirm(
+      `Delete "${selectedStoreName}"?\n\nThis will also delete ${fileCount} file(s) in this file database.\nThis action cannot be undone.`
+    );
+    if (!shouldDelete) {
+      return;
+    }
+  }
+
+  setStatus("Deleting file database and files...", false);
+  const response = await runtimeSendMessage({
+    type: "VECTOR_STORE_DELETE",
+    vectorStoreId: selectedStoreId
+  });
+  if (!response || !response.ok) {
+    throw new Error((response && response.error) || "Could not delete file database.");
+  }
+
+  await clearStoredVectorStoreIfMatches(selectedStoreId);
+  await refreshVectorStores("");
+  ui.vectorStoreId.value = "";
+  setStatus(`Deleted "${selectedStoreName}" and ${fileCount} file(s).`, false);
 }
 
 async function saveSettings() {
+  const existingSettings = await getSettings();
+  const typedApiKey = ui.apiKey.value.trim();
+
+  let apiKeyEncrypted = existingSettings.apiKeyEncrypted || null;
+  if (typedApiKey) {
+    apiKeyEncrypted = await encryptApiKey(typedApiKey);
+  }
+
   const settings = {
-    apiKey: ui.apiKey.value.trim(),
+    apiKeyEncrypted,
     vectorStoreId: ui.vectorStoreId.value.trim(),
-    model: ui.model.value.trim() || "gpt-4.1-mini"
+    vectorStoreName: (cachedVectorStores.find((store) => store.id === ui.vectorStoreId.value) || {}).name || "",
+    model: ui.model.value || "gpt-4.1-mini"
   };
 
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+
+  ui.apiKey.value = "";
+  ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
   ui.configSummary.textContent = summarizeConfig(settings);
-  setStatus("Configuration saved.", false);
 }
 
-function validateInputs() {
-  if (!ui.apiKey.value.trim()) {
+function validateInputs(existingSettings) {
+  const typedApiKey = ui.apiKey.value.trim();
+  const hasSavedKey = hasConfiguredApiKey(existingSettings);
+
+  if (!typedApiKey && !hasSavedKey) {
     throw new Error("OpenAI API key is required.");
   }
   if (!ui.vectorStoreId.value.trim()) {
-    throw new Error("Vector Store ID is required.");
+    throw new Error("File database selection is required.");
   }
 }
 
 async function ensureConfigured() {
   const settings = await getSettings();
 
-  if (!settings.apiKey || !settings.apiKey.trim() || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
+  if (!hasConfiguredApiKey(settings) || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
     switchView("settings");
-    throw new Error("Set API key and Vector Store ID in Configuration first.");
+    throw new Error("Set API key and File Database in Configuration first.");
   }
 }
 
@@ -135,6 +386,160 @@ async function startFill() {
   }
 }
 
+async function fileToPayload(file) {
+  const buffer = await file.arrayBuffer();
+  return {
+    filename: file.name,
+    mimeType: file.type || "application/octet-stream",
+    base64: bytesToBase64(new Uint8Array(buffer))
+  };
+}
+
+function formatDate(epochSeconds) {
+  if (!epochSeconds) {
+    return "-";
+  }
+  return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+function renderFiles(files) {
+  ui.filesList.innerHTML = "";
+
+  if (!files.length) {
+    const item = document.createElement("li");
+    item.className = "file-item";
+    item.textContent = "No files available.";
+    ui.filesList.appendChild(item);
+    return;
+  }
+
+  files.forEach((file) => {
+    const item = document.createElement("li");
+    item.className = "file-item";
+
+    const title = document.createElement("div");
+    title.className = "file-title";
+    title.textContent = file.filename || file.name || "File name unavailable";
+
+    const meta = document.createElement("div");
+    meta.className = "file-meta";
+    meta.textContent = `status: ${file.status || "unknown"} | created: ${formatDate(file.created_at)}`;
+
+    const rowActions = document.createElement("div");
+    rowActions.className = "row-actions";
+
+    const replaceBtn = document.createElement("button");
+    replaceBtn.className = "secondary";
+    replaceBtn.type = "button";
+    replaceBtn.textContent = "Update";
+    replaceBtn.addEventListener("click", () => {
+      pendingReplaceFileId = file.file_id || file.id;
+      ui.replaceFileInput.value = "";
+      ui.replaceFileInput.click();
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "secondary";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => {
+      handleDeleteFile(file.file_id || file.id);
+    });
+
+    rowActions.appendChild(replaceBtn);
+    rowActions.appendChild(deleteBtn);
+
+    item.appendChild(title);
+    item.appendChild(meta);
+    item.appendChild(rowActions);
+
+    ui.filesList.appendChild(item);
+  });
+}
+
+async function refreshFiles() {
+  try {
+    await ensureConfigured();
+    setFilesStatus("Loading files...", false);
+
+    const response = await runtimeSendMessage({ type: "VECTOR_FILES_LIST" });
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Failed to load files.");
+    }
+
+    renderFiles(response.files || []);
+    setFilesStatus(`Loaded ${response.files.length} file(s).`, false);
+  } catch (error) {
+    renderFiles([]);
+    setFilesStatus((error && error.message) || "Failed to load files.", true);
+  }
+}
+
+async function handleUploadFile() {
+  try {
+    await ensureConfigured();
+
+    const file = ui.newFileInput.files && ui.newFileInput.files[0];
+    if (!file) {
+      throw new Error("Choose a file first.");
+    }
+
+    setFilesStatus("Uploading file...", false);
+    const payload = await fileToPayload(file);
+    const response = await runtimeSendMessage({ type: "VECTOR_FILES_ADD", file: payload });
+
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Upload failed.");
+    }
+
+    ui.newFileInput.value = "";
+    setFilesStatus("File uploaded and attached.", false);
+    await refreshFiles();
+  } catch (error) {
+    setFilesStatus((error && error.message) || "Upload failed.", true);
+  }
+}
+
+async function handleDeleteFile(fileId) {
+  try {
+    await ensureConfigured();
+    setFilesStatus("Deleting file...", false);
+
+    const response = await runtimeSendMessage({ type: "VECTOR_FILES_DELETE", fileId });
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Delete failed.");
+    }
+
+    setFilesStatus("File deleted.", false);
+    await refreshFiles();
+  } catch (error) {
+    setFilesStatus((error && error.message) || "Delete failed.", true);
+  }
+}
+
+async function handleReplaceFile(fileId, replacementFile) {
+  try {
+    await ensureConfigured();
+    setFilesStatus("Updating file...", false);
+
+    const payload = await fileToPayload(replacementFile);
+    const response = await runtimeSendMessage({
+      type: "VECTOR_FILES_UPDATE",
+      fileId,
+      file: payload
+    });
+
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Update failed.");
+    }
+
+    setFilesStatus("File updated.", false);
+    await refreshFiles();
+  } catch (error) {
+    setFilesStatus((error && error.message) || "Update failed.", true);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message) => {
   if (!message || typeof message !== "object") {
     return;
@@ -151,15 +556,69 @@ chrome.runtime.onMessage.addListener((message) => {
 
 ui.openSettingsBtn.addEventListener("click", () => {
   switchView("settings");
+  refreshVectorStores(ui.vectorStoreId.value).catch(() => {
+    // already handled in refreshVectorStores
+  });
 });
 
 ui.backBtn.addEventListener("click", () => {
   switchView("actions");
 });
 
+ui.openFilesBtn.addEventListener("click", async () => {
+  switchView("files");
+  await refreshFiles();
+});
+
+ui.filesBackBtn.addEventListener("click", () => {
+  switchView("actions");
+});
+
+ui.refreshFilesBtn.addEventListener("click", refreshFiles);
+ui.uploadFileBtn.addEventListener("click", handleUploadFile);
+ui.refreshStoresBtn.addEventListener("click", async () => {
+  await refreshVectorStores(ui.vectorStoreId.value);
+});
+
+ui.vectorStoreId.addEventListener("change", () => {
+  updateStoreActionsState();
+  persistSelectedVectorStore(ui.vectorStoreId.value).catch((error) => {
+    setStatus((error && error.message) || "Could not save file database selection.", true);
+  });
+});
+
+ui.createStoreBtn.addEventListener("click", async () => {
+  try {
+    await createVectorStore();
+  } catch (error) {
+    setStatus((error && error.message) || "Could not create file database.", true);
+  }
+});
+
+ui.deleteStoreBtn.addEventListener("click", async () => {
+  try {
+    await deleteSelectedVectorStore();
+  } catch (error) {
+    setStatus((error && error.message) || "Could not delete file database.", true);
+  }
+});
+
+ui.replaceFileInput.addEventListener("change", async () => {
+  const file = ui.replaceFileInput.files && ui.replaceFileInput.files[0];
+  if (!file || !pendingReplaceFileId) {
+    return;
+  }
+
+  const fileId = pendingReplaceFileId;
+  pendingReplaceFileId = null;
+  ui.replaceFileInput.value = "";
+  await handleReplaceFile(fileId, file);
+});
+
 ui.saveBtn.addEventListener("click", async () => {
   try {
-    validateInputs();
+    const existingSettings = await getSettings();
+    validateInputs(existingSettings);
     await saveSettings();
     switchView("actions");
   } catch (error) {
