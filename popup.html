@@ -1,0 +1,162 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Form Filler</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #0f766e;
+      --accent-2: #115e59;
+      --danger: #b91c1c;
+      --border: #dbe2ea;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      width: 380px;
+      min-height: 460px;
+      padding: 14px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: 16px;
+      margin: 0 0 10px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 8px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    button {
+      appearance: none;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      flex: 1;
+    }
+
+    button.primary:hover {
+      background: var(--accent-2);
+    }
+
+    button.secondary {
+      background: #e8eef5;
+      color: var(--text);
+      min-width: 88px;
+    }
+
+    #status {
+      min-height: 18px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+      word-break: break-word;
+    }
+
+    #status.error {
+      color: var(--danger);
+    }
+
+    #log {
+      margin: 0;
+      padding-left: 16px;
+      max-height: 180px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--text);
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+
+    .small {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>AI Form Filler</h1>
+
+    <label for="apiKey">OpenAI API Key</label>
+    <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+
+    <label for="vectorStoreId">Vector Store ID</label>
+    <input id="vectorStoreId" type="text" placeholder="vs_..." autocomplete="off" />
+
+    <label for="model">Model</label>
+    <input id="model" type="text" value="gpt-4.1-mini" autocomplete="off" />
+
+    <div class="actions">
+      <button class="secondary" id="saveBtn" type="button">Save</button>
+      <button class="primary" id="fillBtn" type="button">Fill Current Form</button>
+    </div>
+
+    <div id="status"></div>
+    <div class="small">Your key is stored locally with Chrome extension storage.</div>
+  </div>
+
+  <div class="card">
+    <strong style="font-size: 13px;">Field Progress</strong>
+    <ul id="log"></ul>
+    <div class="hint">Each field is searched against your OpenAI File Search documents and filled sequentially.</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
