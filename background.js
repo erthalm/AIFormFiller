@@ -250,6 +250,30 @@ async function processAutofill(tabId) {
   });
 }
 
+async function processSingleField(field) {
+  const settings = await getSettings();
+  const apiKey = settings.apiKey?.trim();
+  const vectorStoreId = settings.vectorStoreId?.trim();
+  const model = settings.model?.trim() || "gpt-4.1-mini";
+
+  if (!apiKey) {
+    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+  }
+  if (!vectorStoreId) {
+    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+  }
+  if (!field || typeof field !== "object") {
+    throw new Error("Invalid field payload.");
+  }
+
+  const answer = await queryFieldAnswer({ apiKey, vectorStoreId, model, field });
+  if (!answer) {
+    return { ok: true, found: false };
+  }
+
+  return { ok: true, found: true, value: answer };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") {
     return;
@@ -276,5 +300,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
 
     sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === "FILL_SINGLE_FIELD") {
+    processSingleField(message.field)
+      .then((result) => {
+        sendResponse(result);
+      })
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error.message || "Could not fill field."
+        });
+      });
+
+    return true;
   }
 });

@@ -1,4 +1,11 @@
 ﻿let fieldMap = new Map();
+let uidCounter = 0;
+
+let hoverButton = null;
+let hoverStatus = null;
+let activeHoverField = null;
+let hideTimer = null;
+let statusTimer = null;
 
 function isVisible(el) {
   const style = window.getComputedStyle(el);
@@ -76,9 +83,17 @@ function getLabelText(el) {
   return "";
 }
 
-function getFieldDescriptor(el, index) {
+function ensureFieldUid(el) {
+  if (!el.dataset.affUid) {
+    uidCounter += 1;
+    el.dataset.affUid = `aff-${Date.now()}-${uidCounter}`;
+  }
+  return el.dataset.affUid;
+}
+
+function getFieldDescriptor(el) {
   const tag = el.tagName.toLowerCase();
-  const uid = `aff-${Date.now()}-${index}`;
+  const uid = ensureFieldUid(el);
 
   const descriptor = {
     uid,
@@ -98,6 +113,7 @@ function getFieldDescriptor(el, index) {
       .slice(0, 50);
   }
 
+  fieldMap.set(uid, el);
   return descriptor;
 }
 
@@ -107,13 +123,7 @@ function collectFields() {
   const elements = Array.from(document.querySelectorAll("input, textarea, select"))
     .filter((el) => !shouldSkipInput(el));
 
-  const fields = elements.map((el, idx) => {
-    const descriptor = getFieldDescriptor(el, idx);
-    fieldMap.set(descriptor.uid, el);
-    return descriptor;
-  });
-
-  return fields;
+  return elements.map((el) => getFieldDescriptor(el));
 }
 
 function setNativeValue(el, value) {
@@ -137,7 +147,7 @@ function fillField(uid, value) {
   }
 
   const tag = el.tagName.toLowerCase();
-  const trimmedValue = cleanText(String(value ?? ""));
+  const trimmedValue = cleanText(String(value == null ? "" : value));
 
   if (!trimmedValue) {
     return { ok: false, error: "Empty value was provided." };
@@ -188,10 +198,11 @@ function fillField(uid, value) {
       }
 
       const radios = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(radioName)}"]`));
+      const normalizedValue = trimmedValue.toLowerCase();
       const match = radios.find((r) => {
         const label = getLabelText(r).toLowerCase();
         const val = cleanText(r.value).toLowerCase();
-        return label === trimmedValue.toLowerCase() || val === trimmedValue.toLowerCase() || label.includes(trimmedValue.toLowerCase());
+        return label === normalizedValue || val === normalizedValue || label.includes(normalizedValue);
       });
 
       if (!match) {
@@ -206,6 +217,223 @@ function fillField(uid, value) {
 
   setNativeValue(el, trimmedValue);
   return { ok: true };
+}
+
+function runtimeSendMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+function ensureHoverControls() {
+  if (hoverButton && hoverStatus) {
+    return;
+  }
+
+  hoverButton = document.createElement("button");
+  hoverButton.type = "button";
+  hoverButton.textContent = "Fill with AI";
+  hoverButton.style.position = "fixed";
+  hoverButton.style.zIndex = "2147483647";
+  hoverButton.style.display = "none";
+  hoverButton.style.padding = "4px 8px";
+  hoverButton.style.fontSize = "12px";
+  hoverButton.style.borderRadius = "6px";
+  hoverButton.style.border = "1px solid #0f766e";
+  hoverButton.style.background = "#0f766e";
+  hoverButton.style.color = "#ffffff";
+  hoverButton.style.cursor = "pointer";
+  hoverButton.style.boxShadow = "0 4px 10px rgba(0,0,0,.15)";
+
+  hoverStatus = document.createElement("div");
+  hoverStatus.style.position = "fixed";
+  hoverStatus.style.zIndex = "2147483647";
+  hoverStatus.style.display = "none";
+  hoverStatus.style.padding = "4px 8px";
+  hoverStatus.style.fontSize = "12px";
+  hoverStatus.style.borderRadius = "6px";
+  hoverStatus.style.background = "#111827";
+  hoverStatus.style.color = "#ffffff";
+  hoverStatus.style.pointerEvents = "none";
+  hoverStatus.style.maxWidth = "240px";
+
+  document.documentElement.appendChild(hoverButton);
+  document.documentElement.appendChild(hoverStatus);
+
+  hoverButton.addEventListener("mouseenter", () => {
+    clearTimeout(hideTimer);
+  });
+
+  hoverButton.addEventListener("mouseleave", () => {
+    scheduleHideHoverButton();
+  });
+
+  hoverButton.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!activeHoverField || shouldSkipInput(activeHoverField)) {
+      showFieldStatus("Field unavailable", true);
+      hideHoverButton();
+      return;
+    }
+
+    const descriptor = getFieldDescriptor(activeHoverField);
+
+    hoverButton.disabled = true;
+    hoverButton.textContent = "Filling...";
+    showFieldStatus("Searching docs...", false);
+
+    try {
+      const response = await runtimeSendMessage({
+        type: "FILL_SINGLE_FIELD",
+        field: descriptor
+      });
+
+      if (!response || !response.ok) {
+        throw new Error((response && response.error) || "Could not fetch value for this field.");
+      }
+
+      if (!response.found || !response.value) {
+        showFieldStatus("No answer found", true);
+        return;
+      }
+
+      const fillResult = fillField(descriptor.uid, response.value);
+      if (!fillResult.ok) {
+        throw new Error(fillResult.error || "Unable to apply answer to field.");
+      }
+
+      showFieldStatus("Field filled", false);
+    } catch (error) {
+      showFieldStatus((error && error.message) || "Fill failed", true);
+    } finally {
+      hoverButton.disabled = false;
+      hoverButton.textContent = "Fill with AI";
+    }
+  });
+}
+
+function positionHoverControlsFor(el) {
+  if (!hoverButton || !hoverStatus) {
+    return;
+  }
+
+  const rect = el.getBoundingClientRect();
+  const top = Math.max(8, rect.top - 30);
+  const left = Math.max(8, Math.min(window.innerWidth - 120, rect.right - 100));
+
+  hoverButton.style.top = `${top}px`;
+  hoverButton.style.left = `${left}px`;
+
+  if (hoverStatus.style.display !== "none") {
+    hoverStatus.style.top = `${top + 30}px`;
+    hoverStatus.style.left = `${left}px`;
+  }
+}
+
+function showHoverButtonFor(el) {
+  ensureHoverControls();
+
+  if (shouldSkipInput(el)) {
+    hideHoverButton();
+    return;
+  }
+
+  activeHoverField = el;
+  positionHoverControlsFor(el);
+  hoverButton.style.display = "block";
+}
+
+function hideHoverButton() {
+  if (hoverButton) {
+    hoverButton.style.display = "none";
+  }
+  if (hoverStatus) {
+    hoverStatus.style.display = "none";
+  }
+  activeHoverField = null;
+}
+
+function scheduleHideHoverButton() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    hideHoverButton();
+  }, 220);
+}
+
+function showFieldStatus(message, isError) {
+  if (!hoverStatus || !activeHoverField) {
+    return;
+  }
+
+  clearTimeout(statusTimer);
+  hoverStatus.textContent = message;
+  hoverStatus.style.background = isError ? "#b91c1c" : "#111827";
+  hoverStatus.style.display = "block";
+  positionHoverControlsFor(activeHoverField);
+
+  statusTimer = setTimeout(() => {
+    if (hoverStatus) {
+      hoverStatus.style.display = "none";
+    }
+  }, 2400);
+}
+
+function handlePointerOver(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  if (hoverButton && (target === hoverButton || hoverButton.contains(target))) {
+    clearTimeout(hideTimer);
+    return;
+  }
+
+  const field = target.closest("input, textarea, select");
+  if (!field) {
+    return;
+  }
+
+  clearTimeout(hideTimer);
+  showHoverButtonFor(field);
+}
+
+function handlePointerOut(event) {
+  const target = event.target;
+  const related = event.relatedTarget;
+
+  if (!(target instanceof Element)) {
+    return;
+  }
+
+  const isField = Boolean(target.closest("input, textarea, select"));
+  const goingToButton = Boolean(hoverButton && related instanceof Node && hoverButton.contains(related));
+
+  if (isField && !goingToButton) {
+    scheduleHideHoverButton();
+  }
+}
+
+function handleViewportChange() {
+  if (activeHoverField && hoverButton && hoverButton.style.display !== "none") {
+    positionHoverControlsFor(activeHoverField);
+  }
+}
+
+function initInlineFillControl() {
+  ensureHoverControls();
+  document.addEventListener("mouseover", handlePointerOver, true);
+  document.addEventListener("mouseout", handlePointerOut, true);
+  window.addEventListener("scroll", handleViewportChange, true);
+  window.addEventListener("resize", handleViewportChange);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -224,3 +452,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse(result);
   }
 });
+
+initInlineFillControl();

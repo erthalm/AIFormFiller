@@ -1,16 +1,21 @@
 ﻿const SETTINGS_KEY = "aiFormFillerSettings";
 
 const ui = {
+  actionsView: document.getElementById("actionsView"),
+  settingsView: document.getElementById("settingsView"),
+  configSummary: document.getElementById("configSummary"),
   apiKey: document.getElementById("apiKey"),
   vectorStoreId: document.getElementById("vectorStoreId"),
   model: document.getElementById("model"),
   saveBtn: document.getElementById("saveBtn"),
+  backBtn: document.getElementById("backBtn"),
+  openSettingsBtn: document.getElementById("openSettingsBtn"),
   fillBtn: document.getElementById("fillBtn"),
   status: document.getElementById("status"),
   log: document.getElementById("log")
 };
 
-function setStatus(message, isError = false) {
+function setStatus(message, isError) {
   ui.status.textContent = message;
   ui.status.classList.toggle("error", Boolean(isError));
 }
@@ -26,9 +31,35 @@ function clearLog() {
   ui.log.innerHTML = "";
 }
 
+function switchView(view) {
+  const actionsActive = view === "actions";
+  ui.actionsView.classList.toggle("active", actionsActive);
+  ui.settingsView.classList.toggle("active", !actionsActive);
+}
+
 async function getSettings() {
   const data = await chrome.storage.local.get([SETTINGS_KEY]);
   return data[SETTINGS_KEY] || {};
+}
+
+function summarizeConfig(settings) {
+  const hasKey = Boolean(settings.apiKey && settings.apiKey.trim());
+  const hasStore = Boolean(settings.vectorStoreId && settings.vectorStoreId.trim());
+  const model = settings.model || "gpt-4.1-mini";
+
+  if (hasKey && hasStore) {
+    return `Configured. Model: ${model}`;
+  }
+
+  return "Not fully configured. Open Configuration.";
+}
+
+async function loadSettings() {
+  const settings = await getSettings();
+  ui.apiKey.value = settings.apiKey || "";
+  ui.vectorStoreId.value = settings.vectorStoreId || "";
+  ui.model.value = settings.model || "gpt-4.1-mini";
+  ui.configSummary.textContent = summarizeConfig(settings);
 }
 
 async function saveSettings() {
@@ -39,14 +70,8 @@ async function saveSettings() {
   };
 
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
-  setStatus("Settings saved.");
-}
-
-async function loadSettings() {
-  const settings = await getSettings();
-  ui.apiKey.value = settings.apiKey || "";
-  ui.vectorStoreId.value = settings.vectorStoreId || "";
-  ui.model.value = settings.model || "gpt-4.1-mini";
+  ui.configSummary.textContent = summarizeConfig(settings);
+  setStatus("Configuration saved.", false);
 }
 
 function validateInputs() {
@@ -55,6 +80,15 @@ function validateInputs() {
   }
   if (!ui.vectorStoreId.value.trim()) {
     throw new Error("Vector Store ID is required.");
+  }
+}
+
+async function ensureConfigured() {
+  const settings = await getSettings();
+
+  if (!settings.apiKey || !settings.apiKey.trim() || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
+    switchView("settings");
+    throw new Error("Set API key and Vector Store ID in Configuration first.");
   }
 }
 
@@ -77,13 +111,12 @@ function runtimeSendMessage(message) {
 
 async function startFill() {
   try {
-    setStatus("Preparing autofill...");
+    setStatus("Preparing autofill...", false);
     clearLog();
-    validateInputs();
-    await saveSettings();
+    await ensureConfigured();
 
     const activeTab = await getActiveTab();
-    if (!activeTab?.id) {
+    if (!activeTab || !activeTab.id) {
       throw new Error("Unable to find the active browser tab.");
     }
 
@@ -92,13 +125,13 @@ async function startFill() {
       tabId: activeTab.id
     });
 
-    if (!response?.ok) {
-      throw new Error(response?.error || "Failed to start autofill.");
+    if (!response || !response.ok) {
+      throw new Error((response && response.error) || "Failed to start autofill.");
     }
 
-    setStatus("Autofill started. Processing fields...");
+    setStatus("Autofill started. Processing fields...", false);
   } catch (error) {
-    setStatus(error.message || "Unexpected error.", true);
+    setStatus((error && error.message) || "Unexpected error.", true);
   }
 }
 
@@ -116,11 +149,21 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+ui.openSettingsBtn.addEventListener("click", () => {
+  switchView("settings");
+});
+
+ui.backBtn.addEventListener("click", () => {
+  switchView("actions");
+});
+
 ui.saveBtn.addEventListener("click", async () => {
   try {
+    validateInputs();
     await saveSettings();
+    switchView("actions");
   } catch (error) {
-    setStatus(error.message || "Could not save settings.", true);
+    setStatus((error && error.message) || "Could not save settings.", true);
   }
 });
 
@@ -128,6 +171,6 @@ ui.fillBtn.addEventListener("click", startFill);
 
 document.addEventListener("DOMContentLoaded", () => {
   loadSettings().catch((error) => {
-    setStatus(error.message || "Failed to load settings.", true);
+    setStatus((error && error.message) || "Failed to load settings.", true);
   });
 });
