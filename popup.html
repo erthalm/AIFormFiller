@@ -7,14 +7,18 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f8fb;
-      --card: #ffffff;
-      --text: #1f2937;
-      --muted: #6b7280;
+      --bg-top: #f7fafc;
+      --bg-bottom: #ecf3f8;
+      --card: #ffffffd9;
+      --text: #122230;
+      --muted: #587082;
       --accent: #0f766e;
-      --accent-2: #115e59;
-      --danger: #b91c1c;
-      --border: #dbe2ea;
+      --accent-2: #0d665f;
+      --accent-soft: #d7f0ed;
+      --danger: #b42318;
+      --danger-soft: #fde8e5;
+      --border: #d1dee8;
+      --shadow: 0 14px 28px -18px rgba(14, 27, 40, 0.45);
     }
 
     * {
@@ -23,29 +27,66 @@
 
     body {
       margin: 0;
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      background: var(--bg);
+      font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+      background: linear-gradient(170deg, var(--bg-top), var(--bg-bottom));
       color: var(--text);
-      width: 380px;
+      width: min(420px, 100vw);
       min-height: 460px;
-      padding: 14px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: absolute;
+      inset: -140px -120px auto auto;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #89d4cb, transparent 68%);
+      opacity: 0.38;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: "";
+      position: absolute;
+      inset: auto auto -160px -100px;
+      width: 300px;
+      height: 300px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #fbc593, transparent 72%);
+      opacity: 0.2;
+      pointer-events: none;
+      z-index: 0;
     }
 
     .card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 10px;
+      backdrop-filter: blur(6px);
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+      position: relative;
+      z-index: 1;
+      animation: rise 280ms ease-out both;
     }
 
     h1 {
-      font-size: 16px;
+      font-size: 17px;
+      letter-spacing: 0.02em;
       margin: 0 0 10px;
+      font-weight: 700;
     }
 
     .view {
       display: none;
+      position: relative;
+      z-index: 1;
     }
 
     .view.active {
@@ -55,7 +96,7 @@
     .actions {
       display: flex;
       gap: 8px;
-      margin-top: 8px;
+      margin-top: 10px;
     }
 
     .stack {
@@ -68,74 +109,98 @@
     label {
       display: block;
       font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 4px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      margin-bottom: 6px;
+      color: #27404f;
     }
 
     input,
     select {
       width: 100%;
-      padding: 8px;
+      padding: 9px 10px;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 13px;
       margin-bottom: 8px;
-      background: #fff;
+      background: #ffffff;
       color: var(--text);
+      transition: border-color 130ms ease, box-shadow 130ms ease;
+    }
+
+    input:focus,
+    select:focus {
+      outline: none;
+      border-color: #53a398;
+      box-shadow: 0 0 0 3px #dff5f1;
     }
 
     button {
       appearance: none;
       border: none;
-      border-radius: 8px;
-      padding: 8px 10px;
+      border-radius: 10px;
+      padding: 9px 11px;
       font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
+      transition: transform 120ms ease, filter 140ms ease, background-color 140ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.98);
+    }
+
+    button:active {
+      transform: translateY(0);
     }
 
     button.primary {
-      background: var(--accent);
+      background: linear-gradient(160deg, var(--accent), var(--accent-2));
       color: #fff;
+      box-shadow: 0 10px 18px -14px rgba(15, 118, 110, 0.9);
     }
 
     button.primary:hover {
-      background: var(--accent-2);
+      filter: brightness(1.03);
     }
 
     button.secondary {
-      background: #e8eef5;
-      color: var(--text);
+      background: #eaf2f8;
+      color: #27404f;
     }
 
     button.danger {
-      background: #fee2e2;
-      color: #991b1b;
+      background: var(--danger-soft);
+      color: var(--danger);
     }
 
     button:disabled {
-      opacity: 0.6;
+      opacity: 0.5;
       cursor: not-allowed;
+      transform: none;
     }
 
     .section {
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px;
+      border-radius: 12px;
+      padding: 11px;
       margin-bottom: 10px;
-      background: #fbfdff;
+      background: #f9fcff;
     }
 
     .section-title {
       font-size: 12px;
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: 9px;
+      color: #233948;
     }
 
     #status {
-      min-height: 18px;
+      min-height: 20px;
       font-size: 12px;
       color: var(--muted);
-      margin-top: 8px;
+      margin-top: 10px;
       word-break: break-word;
     }
 
@@ -147,6 +212,7 @@
       font-size: 12px;
       color: var(--muted);
       margin-top: 4px;
+      margin-bottom: 8px;
     }
 
     #log {
@@ -155,7 +221,7 @@
       max-height: 180px;
       overflow: auto;
       font-size: 12px;
-      line-height: 1.35;
+      line-height: 1.45;
       color: var(--text);
     }
 
@@ -179,11 +245,12 @@
       max-height: 260px;
       overflow: auto;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
+      background: #fcfeff;
     }
 
     .file-item {
-      padding: 8px;
+      padding: 10px;
       border-bottom: 1px solid var(--border);
       font-size: 12px;
     }
@@ -207,17 +274,77 @@
     .row-actions {
       display: flex;
       gap: 6px;
+      margin-top: 8px;
+    }
+
+    .card strong {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1c3341;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: #0f766e;
+      background: var(--accent-soft);
+      border-radius: 999px;
+      padding: 4px 8px;
+      text-transform: uppercase;
+    }
+
+    .mt-0 {
+      margin-top: 0;
+    }
+
+    .mt-8 {
+      margin-top: 8px;
+    }
+
+    .mb-0 {
+      margin-bottom: 0;
+    }
+
+    .flex-1 {
+      flex: 1;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
   </style>
 </head>
 <body>
   <div id="actionsView" class="view active">
     <div class="card">
-      <h1>AI Form Filler</h1>
+      <div class="title-row">
+        <h1>AI Form Filler</h1>
+        <span class="badge">Ready</span>
+      </div>
       <div id="configSummary"></div>
-      <label for="vectorStoreId" style="margin-top:8px;">File Database</label>
-      <div class="actions" style="margin-top:0;">
-        <select id="vectorStoreId" style="margin-bottom:0; flex:1;"></select>
+      <label for="vectorStoreId" class="mt-8">File Database</label>
+      <div class="actions mt-0">
+        <select id="vectorStoreId" class="mb-0 flex-1"></select>
         <button class="secondary" id="refreshStoresBtn" type="button">Refresh</button>
       </div>
       <div class="stack">
@@ -229,7 +356,7 @@
     </div>
 
     <div class="card">
-      <strong style="font-size: 13px;">Field Progress</strong>
+      <strong>Field Progress</strong>
       <ul id="log"></ul>
       <div class="hint">Each field is searched against your OpenAI File Search documents and filled sequentially.</div>
     </div>
@@ -244,17 +371,17 @@
 
       <div class="section">
         <div class="section-title">Create Database</div>
-        <div class="actions" style="margin-top:0;">
-          <input id="newStoreName" type="text" placeholder="New file database name" style="margin-bottom:0; flex:1;" />
+        <div class="actions mt-0">
+          <input id="newStoreName" type="text" placeholder="New file database name" class="mb-0 flex-1" />
           <button class="secondary" id="createStoreBtn" type="button">Create</button>
         </div>
       </div>
 
       <div class="section">
         <div class="section-title">Delete Database</div>
-        <div class="small" style="margin-top:0;">Target: <strong id="selectedStoreForDelete">None</strong></div>
-        <div class="small" style="margin-top:4px;">This removes the database and every file in it.</div>
-        <div class="actions" style="margin-top:8px;">
+        <div class="small mt-0">Target: <strong id="selectedStoreForDelete">None</strong></div>
+        <div class="small">This removes the database and every file in it.</div>
+        <div class="actions mt-8">
           <button class="danger" id="deleteStoreBtn" type="button">Delete Database</button>
         </div>
       </div>
@@ -290,11 +417,11 @@
       </div>
 
       <div id="filesStatus" class="small"></div>
-      <input id="replaceFileInput" type="file" style="display:none;" />
+      <input id="replaceFileInput" class="hidden" type="file" />
     </div>
 
     <div class="card">
-      <strong style="font-size: 13px;">Current Files</strong>
+      <strong>Current Files</strong>
       <ul id="filesList" class="file-list"></ul>
       <div class="hint">Update = replace file with a new version.</div>
     </div>
