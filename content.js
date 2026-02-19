@@ -6,6 +6,9 @@ let hoverStatus = null;
 let activeHoverField = null;
 let hideTimer = null;
 let statusTimer = null;
+let availabilityTimer = null;
+let availabilityObserver = null;
+let lastKnownHasForm = null;
 
 function isVisible(el) {
   const style = window.getComputedStyle(el);
@@ -126,6 +129,24 @@ function collectFields() {
   return elements.map((el) => getFieldDescriptor(el));
 }
 
+function hasFillableForms() {
+  const elements = Array.from(document.querySelectorAll("input, textarea, select"));
+  return elements.some((el) => {
+    if (el.disabled || el.readOnly) {
+      return false;
+    }
+
+    if (el.tagName.toLowerCase() === "input") {
+      const t = (el.type || "text").toLowerCase();
+      if (["hidden", "submit", "button", "reset", "file", "image"].includes(t)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 function setNativeValue(el, value) {
   const prototype = Object.getPrototypeOf(el);
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
@@ -229,6 +250,85 @@ function runtimeSendMessage(message) {
       resolve(response);
     });
   });
+}
+
+function hasFillableForms() {
+  const selectors = [
+    "input",
+    "textarea",
+    "select",
+    "[contenteditable='true']",
+    "[role='textbox']"
+  ];
+
+  const elements = Array.from(document.querySelectorAll(selectors.join(",")));
+  return elements.some((el) => {
+    if (!(el instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (el.closest("[aria-hidden='true']")) {
+      return false;
+    }
+
+    if ("disabled" in el && el.disabled) {
+      return false;
+    }
+    if ("readOnly" in el && el.readOnly) {
+      return false;
+    }
+
+    if (el.tagName.toLowerCase() === "input") {
+      const t = (el.type || "text").toLowerCase();
+      if (["hidden", "submit", "button", "reset", "file", "image"].includes(t)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+function notifyFormAvailability(force) {
+  const hasForm = hasFillableForms();
+  if (!force && hasForm === lastKnownHasForm) {
+    return;
+  }
+
+  lastKnownHasForm = hasForm;
+  runtimeSendMessage({
+    type: "FORM_AVAILABILITY_CHANGED",
+    hasForm
+  }).catch(() => {
+    // Ignore transient messaging errors.
+  });
+}
+
+function scheduleAvailabilityCheck() {
+  clearTimeout(availabilityTimer);
+  availabilityTimer = setTimeout(() => {
+    notifyFormAvailability(false);
+  }, 120);
+}
+
+function initFormAvailabilityTracking() {
+  notifyFormAvailability(true);
+
+  if (!availabilityObserver) {
+    availabilityObserver = new MutationObserver(() => {
+      scheduleAvailabilityCheck();
+    });
+    availabilityObserver.observe(document.documentElement || document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["type", "disabled", "readonly", "aria-hidden", "style", "class", "contenteditable", "role"]
+    });
+  }
+
+  window.addEventListener("load", () => notifyFormAvailability(true));
+  document.addEventListener("visibilitychange", () => scheduleAvailabilityCheck());
+  window.addEventListener("pageshow", () => notifyFormAvailability(true));
 }
 
 function ensureHoverControls() {
@@ -447,6 +547,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
+  if (message.type === "HAS_FILLABLE_FORMS") {
+    sendResponse({ ok: true, hasForm: hasFillableForms() });
+    return;
+  }
+
+  if (message.type === "HAS_FILLABLE_FORMS") {
+    sendResponse({ ok: true, hasForm: hasFillableForms() });
+    return;
+  }
+
   if (message.type === "FILL_FORM_FIELD") {
     const result = fillField(message.uid, message.value);
     sendResponse(result);
@@ -454,3 +564,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 initInlineFillControl();
+initFormAvailabilityTracking();

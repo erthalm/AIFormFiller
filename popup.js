@@ -14,6 +14,7 @@ const ui = {
   newStoreName: document.getElementById("newStoreName"),
   createStoreBtn: document.getElementById("createStoreBtn"),
   deleteStoreBtn: document.getElementById("deleteStoreBtn"),
+  selectedStoreForDelete: document.getElementById("selectedStoreForDelete"),
   model: document.getElementById("model"),
 
   saveBtn: document.getElementById("saveBtn"),
@@ -36,6 +37,43 @@ const ui = {
 
 let pendingReplaceFileId = null;
 let cachedVectorStores = [];
+let hasFillableFormOnPage = false;
+
+function storageGet(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result || {});
+    });
+  });
+}
+
+function storageSet(items) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(items, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function queryTabs(queryInfo) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query(queryInfo, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tabs || []);
+    });
+  });
+}
 
 function setStatus(message, isError) {
   ui.status.textContent = message;
@@ -82,12 +120,12 @@ function base64ToBytes(base64) {
 }
 
 async function getSettings() {
-  const data = await chrome.storage.local.get([SETTINGS_KEY]);
+  const data = await storageGet([SETTINGS_KEY]);
   return data[SETTINGS_KEY] || {};
 }
 
 async function getOrCreateCryptoKeyRaw() {
-  const data = await chrome.storage.local.get([CRYPTO_KEY_KEY]);
+  const data = await storageGet([CRYPTO_KEY_KEY]);
   if (data[CRYPTO_KEY_KEY]) {
     return data[CRYPTO_KEY_KEY];
   }
@@ -95,7 +133,7 @@ async function getOrCreateCryptoKeyRaw() {
   const keyBytes = new Uint8Array(32);
   crypto.getRandomValues(keyBytes);
   const raw = bytesToBase64(keyBytes);
-  await chrome.storage.local.set({ [CRYPTO_KEY_KEY]: raw });
+  await storageSet({ [CRYPTO_KEY_KEY]: raw });
   return raw;
 }
 
@@ -142,6 +180,43 @@ function updateStoreActionsState() {
   ui.deleteStoreBtn.disabled = !hasSelection;
   ui.fillBtn.disabled = !hasSelection;
   ui.openFilesBtn.disabled = !hasSelection;
+
+  const selectedOption = ui.vectorStoreId.options[ui.vectorStoreId.selectedIndex];
+  const selectedName = hasSelection && selectedOption ? selectedOption.textContent : "None";
+  ui.selectedStoreForDelete.textContent = selectedName;
+
+  if (!hasSelection) {
+    ui.deleteStoreBtn.textContent = "Delete Database";
+    return;
+  }
+
+  const normalizedName = selectedName.replace(/\s+/g, " ").trim();
+  const shortName = normalizedName.length > 26 ? `${normalizedName.slice(0, 26)}...` : normalizedName;
+  ui.deleteStoreBtn.textContent = `Delete "${shortName}"`;
+}
+
+async function refreshFillAvailability() {
+  hasFillableFormOnPage = false;
+
+  try {
+    const activeTab = await getActiveTab();
+    const tabId = activeTab && activeTab.id;
+    if (!Number.isInteger(tabId)) {
+      updateStoreActionsState();
+      return;
+    }
+
+    const response = await runtimeSendMessage({
+      type: "GET_TAB_FORM_AVAILABILITY",
+      tabId
+    });
+
+    hasFillableFormOnPage = Boolean(response && response.ok && response.hasForm);
+  } catch (_error) {
+    hasFillableFormOnPage = false;
+  }
+
+  updateStoreActionsState();
 }
 
 async function loadSettings() {
@@ -150,7 +225,10 @@ async function loadSettings() {
   ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
   ui.model.value = settings.model || "gpt-4.1-mini";
   ui.configSummary.textContent = summarizeConfig(settings);
-  await refreshVectorStores(settings.vectorStoreId || "");
+  const savedStoreId = settings.vectorStoreId || "";
+  const savedStoreName = settings.vectorStoreName || "Selected file database";
+  cachedVectorStores = savedStoreId ? [{ id: savedStoreId, name: savedStoreName }] : [];
+  populateVectorStoreSelect(cachedVectorStores, savedStoreId);
 }
 
 function populateVectorStoreSelect(stores, selectedId) {
@@ -182,25 +260,35 @@ function populateVectorStoreSelect(stores, selectedId) {
 async function refreshVectorStores(selectedId) {
   const settings = await getSettings();
   const preferredId = selectedId || settings.vectorStoreId || "";
+  const typedApiKey = ui.apiKey.value.trim();
+  const hasAnyApiKey = hasConfiguredApiKey(settings) || Boolean(typedApiKey);
 
-  if (!hasConfiguredApiKey(settings)) {
+  if (!hasAnyApiKey) {
     cachedVectorStores = [];
     populateVectorStoreSelect([], preferredId);
+    setStatus("Add an API key in Configuration, then refresh file databases.", true);
     return;
   }
 
   try {
-    const response = await runtimeSendMessage({ type: "VECTOR_STORES_LIST" });
+    ui.refreshStoresBtn.disabled = true;
+    const response = await runtimeSendMessage({
+      type: "VECTOR_STORES_LIST",
+      apiKey: typedApiKey || undefined
+    });
     if (!response || !response.ok) {
       throw new Error((response && response.error) || "Could not load file databases.");
     }
 
     cachedVectorStores = Array.isArray(response.vectorStores) ? response.vectorStores : [];
     populateVectorStoreSelect(cachedVectorStores, preferredId);
+    setStatus(`Loaded ${cachedVectorStores.length} file database(s).`, false);
   } catch (error) {
     cachedVectorStores = [];
     populateVectorStoreSelect([], preferredId);
     setStatus((error && error.message) || "Could not load file databases.", true);
+  } finally {
+    ui.refreshStoresBtn.disabled = false;
   }
 }
 
@@ -227,6 +315,29 @@ async function createVectorStore() {
   setStatus("File database created.", false);
 }
 
+async function validateApiKeyBeforeSave(existingSettings) {
+  const typedApiKey = ui.apiKey.value.trim();
+  const hasSavedKey = hasConfiguredApiKey(existingSettings);
+
+  if (!typedApiKey && hasSavedKey) {
+    return;
+  }
+
+  if (!typedApiKey && !hasSavedKey) {
+    throw new Error("OpenAI API key is required.");
+  }
+
+  const payload = {
+    type: "VALIDATE_API_KEY",
+    apiKey: typedApiKey
+  };
+
+  const response = await runtimeSendMessage(payload);
+  if (!response || !response.ok) {
+    throw new Error((response && response.error) || "Invalid OpenAI API key.");
+  }
+}
+
 async function persistSelectedVectorStore(selectedStoreId) {
   const settings = await getSettings();
   const selectedId = (selectedStoreId || "").trim();
@@ -238,8 +349,22 @@ async function persistSelectedVectorStore(selectedStoreId) {
     vectorStoreName: selectedStore ? (selectedStore.name || "") : ""
   };
 
-  await chrome.storage.local.set({ [SETTINGS_KEY]: updatedSettings });
+  await storageSet({ [SETTINGS_KEY]: updatedSettings });
   ui.configSummary.textContent = summarizeConfig(updatedSettings);
+}
+
+async function syncSelectedStoreToSettings() {
+  const selectedId = (ui.vectorStoreId.value || "").trim();
+  if (!selectedId) {
+    return;
+  }
+
+  const settings = await getSettings();
+  if ((settings.vectorStoreId || "") === selectedId) {
+    return;
+  }
+
+  await persistSelectedVectorStore(selectedId);
 }
 
 async function clearStoredVectorStoreIfMatches(storeId) {
@@ -253,7 +378,7 @@ async function clearStoredVectorStoreIfMatches(storeId) {
     vectorStoreId: "",
     vectorStoreName: ""
   };
-  await chrome.storage.local.set({ [SETTINGS_KEY]: updatedSettings });
+  await storageSet({ [SETTINGS_KEY]: updatedSettings });
   ui.configSummary.textContent = summarizeConfig(updatedSettings);
 }
 
@@ -315,7 +440,7 @@ async function saveSettings() {
     model: ui.model.value || "gpt-4.1-mini"
   };
 
-  await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  await storageSet({ [SETTINGS_KEY]: settings });
 
   ui.apiKey.value = "";
   ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
@@ -329,12 +454,10 @@ function validateInputs(existingSettings) {
   if (!typedApiKey && !hasSavedKey) {
     throw new Error("OpenAI API key is required.");
   }
-  if (!ui.vectorStoreId.value.trim()) {
-    throw new Error("File database selection is required.");
-  }
 }
 
 async function ensureConfigured() {
+  await syncSelectedStoreToSettings();
   const settings = await getSettings();
 
   if (!hasConfiguredApiKey(settings) || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
@@ -344,7 +467,7 @@ async function ensureConfigured() {
 }
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabs = await queryTabs({ active: true, currentWindow: true });
   return tabs[0];
 }
 
@@ -556,9 +679,6 @@ chrome.runtime.onMessage.addListener((message) => {
 
 ui.openSettingsBtn.addEventListener("click", () => {
   switchView("settings");
-  refreshVectorStores(ui.vectorStoreId.value).catch(() => {
-    // already handled in refreshVectorStores
-  });
 });
 
 ui.backBtn.addEventListener("click", () => {
@@ -566,8 +686,13 @@ ui.backBtn.addEventListener("click", () => {
 });
 
 ui.openFilesBtn.addEventListener("click", async () => {
-  switchView("files");
-  await refreshFiles();
+  try {
+    await ensureConfigured();
+    switchView("files");
+    await refreshFiles();
+  } catch (error) {
+    setStatus((error && error.message) || "Configuration is incomplete.", true);
+  }
 });
 
 ui.filesBackBtn.addEventListener("click", () => {
@@ -619,6 +744,7 @@ ui.saveBtn.addEventListener("click", async () => {
   try {
     const existingSettings = await getSettings();
     validateInputs(existingSettings);
+    await validateApiKeyBeforeSave(existingSettings);
     await saveSettings();
     switchView("actions");
   } catch (error) {
@@ -629,7 +755,10 @@ ui.saveBtn.addEventListener("click", async () => {
 ui.fillBtn.addEventListener("click", startFill);
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadSettings().catch((error) => {
-    setStatus((error && error.message) || "Failed to load settings.", true);
-  });
+  loadSettings()
+    .then(() => refreshFillAvailability())
+    .catch((error) => {
+      setStatus((error && error.message) || "Failed to load settings.", true);
+      updateStoreActionsState();
+    });
 });

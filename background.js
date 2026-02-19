@@ -2,10 +2,50 @@
 const CRYPTO_KEY_KEY = "aiFormFillerCryptoKey";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_FILES_URL = "https://api.openai.com/v1/files";
+const ICON_FORM_AVAILABLE = {
+  16: "icon-form.png",
+  32: "icon-form.png",
+  48: "icon-form.png",
+  128: "icon-form.png"
+};
+const ICON_NO_FORM = {
+  16: "icon-noform.png",
+  32: "icon-noform.png",
+  48: "icon-noform.png",
+  128: "icon-noform.png"
+};
+
+function storageGet(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result || {});
+    });
+  });
+}
 
 function safeRuntimeMessage(message) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(message, () => {
+      resolve();
+    });
+  });
+}
+
+function actionSetIcon(details) {
+  return new Promise((resolve) => {
+    chrome.action.setIcon(details, () => {
+      resolve();
+    });
+  });
+}
+
+function actionSetTitle(details) {
+  return new Promise((resolve) => {
+    chrome.action.setTitle(details, () => {
       resolve();
     });
   });
@@ -20,6 +60,43 @@ function tabMessage(tabId, message) {
       }
       resolve(response);
     });
+  });
+}
+
+async function detectTabHasFillableForm(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return false;
+  }
+
+  try {
+    const quickResponse = await tabMessage(tabId, { type: "HAS_FILLABLE_FORMS" });
+    if (quickResponse?.ok) {
+      return Boolean(quickResponse.hasForm);
+    }
+
+    const fallback = await tabMessage(tabId, { type: "GET_FORM_FIELDS" });
+    const fields = Array.isArray(fallback?.fields) ? fallback.fields : [];
+    return Boolean(fallback?.ok && fields.length > 0);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function updateActionStateForTab(tabId) {
+  const hasForm = await detectTabHasFillableForm(tabId);
+  await updateActionStateForTabKnownValue(tabId, hasForm);
+  return hasForm;
+}
+
+async function updateActionStateForTabKnownValue(tabId, hasForm) {
+  if (!Number.isInteger(tabId)) {
+    return;
+  }
+
+  await actionSetIcon({ tabId, path: hasForm ? ICON_FORM_AVAILABLE : ICON_NO_FORM });
+  await actionSetTitle({
+    tabId,
+    title: hasForm ? "AI Form Filler: form detected" : "AI Form Filler: no fillable form on this page"
   });
 }
 
@@ -42,7 +119,7 @@ async function decryptApiKey(encryptedPayload) {
     return "";
   }
 
-  const data = await chrome.storage.local.get([CRYPTO_KEY_KEY]);
+  const data = await storageGet([CRYPTO_KEY_KEY]);
   const keyRaw = data[CRYPTO_KEY_KEY];
   if (!keyRaw) {
     throw new Error("Encrypted API key exists but cryptographic key is missing. Re-save configuration.");
@@ -57,7 +134,7 @@ async function decryptApiKey(encryptedPayload) {
 }
 
 async function getSettings() {
-  const data = await chrome.storage.local.get([SETTINGS_KEY]);
+  const data = await storageGet([SETTINGS_KEY]);
   const settings = data[SETTINGS_KEY] || {};
 
   let apiKey = "";
@@ -540,9 +617,9 @@ async function processVectorFileUpdate(fileId, file) {
   return { ok: true };
 }
 
-async function processVectorStoresList() {
+async function processVectorStoresList(apiKeyOverride) {
   const settings = await getSettings();
-  const apiKey = settings.apiKey?.trim();
+  const apiKey = String(apiKeyOverride || "").trim() || settings.apiKey?.trim();
 
   if (!apiKey) {
     throw new Error("OpenAI API key is missing. Add it in the extension popup.");
@@ -647,6 +724,34 @@ async function processVectorStoreDelete(vectorStoreId) {
   return { ok: true, deletedFiles: uniqueFileIds.length };
 }
 
+async function processValidateApiKey(apiKeyOverride) {
+  let apiKey = String(apiKeyOverride || "").trim();
+  if (!apiKey) {
+    const settings = await getSettings();
+    apiKey = settings.apiKey?.trim() || "";
+  }
+
+  if (!apiKey) {
+    throw new Error("OpenAI API key is missing.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/vector_stores?limit=1", {
+    method: "GET",
+    headers: buildOpenAIHeaders(apiKey, false, true)
+  });
+
+  if (response.ok) {
+    return { ok: true };
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("Invalid OpenAI API key.");
+  }
+
+  const details = await parseErrorDetails(response);
+  throw new Error(`${classifyHttpError(response.status)}${details ? ` ${details}` : ""}`);
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") {
     return;
@@ -706,7 +811,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "VECTOR_STORES_LIST") {
-    processVectorStoresList()
+    processVectorStoresList(message.apiKey)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Could not list vector stores." }));
     return true;
@@ -732,4 +837,70 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error.message || "Could not delete file database." }));
     return true;
   }
+
+  if (message.type === "VALIDATE_API_KEY") {
+    processValidateApiKey(message.apiKey)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Invalid OpenAI API key." }));
+    return true;
+  }
+
+  if (message.type === "GET_TAB_FORM_AVAILABILITY") {
+    const tabId = Number(message.tabId);
+    updateActionStateForTab(tabId)
+      .then((hasForm) => sendResponse({ ok: true, hasForm }))
+      .catch(() => sendResponse({ ok: true, hasForm: false }));
+    return true;
+  }
+
+  if (message.type === "FORM_AVAILABILITY_CHANGED") {
+    const tabId = sender?.tab?.id;
+    const hasForm = Boolean(message.hasForm);
+    updateActionStateForTabKnownValue(tabId, hasForm).catch(() => {
+      // ignore
+    });
+    sendResponse({ ok: true });
+    return;
+  }
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  updateActionStateForTab(activeInfo.tabId).catch(() => {
+    // ignore
+  });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete") {
+    updateActionStateForTab(tabId).catch(() => {
+      // ignore
+    });
+    setTimeout(() => {
+      updateActionStateForTab(tabId).catch(() => {
+        // ignore
+      });
+    }, 500);
+  }
+});
+
+function initializeActionIcons() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (chrome.runtime.lastError) {
+      return;
+    }
+    const activeTab = tabs && tabs[0];
+    if (activeTab && Number.isInteger(activeTab.id)) {
+      updateActionStateForTab(activeTab.id).catch(() => {
+        // ignore
+      });
+    }
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  initializeActionIcons();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  initializeActionIcons();
 });
