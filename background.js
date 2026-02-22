@@ -2,17 +2,11 @@
 const CRYPTO_KEY_KEY = "aiFormFillerCryptoKey";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_FILES_URL = "https://api.openai.com/v1/files";
-const ICON_FORM_AVAILABLE = {
-  16: "icon-form.png",
-  32: "icon-form.png",
-  48: "icon-form.png",
-  128: "icon-form.png"
-};
-const ICON_NO_FORM = {
-  16: "icon-noform.png",
-  32: "icon-noform.png",
-  48: "icon-noform.png",
-  128: "icon-noform.png"
+const ACTION_ICON = {
+  16: "icon128x128_green.png",
+  32: "icon128x128_green.png",
+  48: "icon128x128_green.png",
+  128: "icon128x128_green.png"
 };
 
 function storageGet(keys) {
@@ -93,7 +87,7 @@ async function updateActionStateForTabKnownValue(tabId, hasForm) {
     return;
   }
 
-  await actionSetIcon({ tabId, path: hasForm ? ICON_FORM_AVAILABLE : ICON_NO_FORM });
+  await actionSetIcon({ tabId, path: ACTION_ICON });
   await actionSetTitle({
     tabId,
     title: hasForm ? "AI Form Filler: form detected" : "AI Form Filler: no fillable form on this page"
