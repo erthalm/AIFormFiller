@@ -8,8 +8,68 @@ const ACTION_ICON = {
   48: "icon128x128_green.png",
   128: "icon128x128_green.png"
 };
+const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
+let languageMessages = {};
+
+function applySubstitutions(template, substitutions) {
+  const values = Array.isArray(substitutions)
+    ? substitutions.map((value) => String(value))
+    : substitutions == null
+      ? []
+      : [String(substitutions)];
+
+  let result = String(template || "");
+  values.forEach((value, idx) => {
+    result = result.split(`$${idx + 1}`).join(value);
+  });
+  return result;
+}
+
+function getOverrideMessage(key, substitutions) {
+  const entry = languageMessages && languageMessages[key];
+  const message = entry && entry.message;
+  if (!message) {
+    return "";
+  }
+  return applySubstitutions(message, substitutions);
+}
+
+async function loadLanguageMessages(language) {
+  const safeLanguage = SUPPORTED_LANGUAGE_OVERRIDES.has(language) ? language : "default";
+  if (safeLanguage === "default") {
+    languageMessages = {};
+    return;
+  }
+
+  try {
+    const url = chrome.runtime.getURL(`_locales/${safeLanguage}/messages.json`);
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Could not load locale file for ${safeLanguage}`);
+    }
+    languageMessages = await response.json();
+  } catch (_error) {
+    languageMessages = {};
+  }
+}
+
+async function initializeLanguageOverride() {
+  try {
+    const data = await storageGet([SETTINGS_KEY]);
+    const settings = data[SETTINGS_KEY] || {};
+    const preferred = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
+    await loadLanguageMessages(preferred);
+  } catch (_error) {
+    languageMessages = {};
+  }
+}
 
 function t(key, substitutions, fallback) {
+  const override = getOverrideMessage(key, substitutions);
+  if (override) {
+    return override;
+  }
+
   const message = chrome.i18n.getMessage(key, substitutions);
   if (message) {
     return message;
@@ -943,9 +1003,28 @@ function initializeActionIcons() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  initializeLanguageOverride().catch(() => {
+    // ignore
+  });
   initializeActionIcons();
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  initializeLanguageOverride().catch(() => {
+    // ignore
+  });
   initializeActionIcons();
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes || !changes[SETTINGS_KEY]) {
+    return;
+  }
+  initializeLanguageOverride().catch(() => {
+    // ignore
+  });
+});
+
+initializeLanguageOverride().catch(() => {
+  // ignore
 });

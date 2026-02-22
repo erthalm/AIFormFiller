@@ -16,6 +16,7 @@ const ui = {
   deleteStoreBtn: document.getElementById("deleteStoreBtn"),
   selectedStoreForDelete: document.getElementById("selectedStoreForDelete"),
   model: document.getElementById("model"),
+  language: document.getElementById("language"),
 
   saveBtn: document.getElementById("saveBtn"),
   backBtn: document.getElementById("backBtn"),
@@ -38,8 +39,67 @@ const ui = {
 let pendingReplaceFileId = null;
 let cachedVectorStores = [];
 let hasFillableFormOnPage = false;
+const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
+let languageOverride = "default";
+let languageMessages = {};
+
+function applySubstitutions(template, substitutions) {
+  const values = Array.isArray(substitutions)
+    ? substitutions.map((value) => String(value))
+    : substitutions == null
+      ? []
+      : [String(substitutions)];
+
+  let result = String(template || "");
+  values.forEach((value, idx) => {
+    result = result.split(`$${idx + 1}`).join(value);
+  });
+  return result;
+}
+
+function getOverrideMessage(key, substitutions) {
+  const entry = languageMessages && languageMessages[key];
+  const message = entry && entry.message;
+  if (!message) {
+    return "";
+  }
+  return applySubstitutions(message, substitutions);
+}
+
+async function loadLanguageMessages(language) {
+  const safeLanguage = SUPPORTED_LANGUAGE_OVERRIDES.has(language) ? language : "default";
+  if (safeLanguage === "default") {
+    languageOverride = "default";
+    languageMessages = {};
+    return;
+  }
+
+  try {
+    const url = chrome.runtime.getURL(`_locales/${safeLanguage}/messages.json`);
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Could not load locale file for ${safeLanguage}`);
+    }
+    languageMessages = await response.json();
+    languageOverride = safeLanguage;
+  } catch (_error) {
+    languageOverride = "default";
+    languageMessages = {};
+  }
+}
+
+async function initializeLanguageOverride() {
+  const settings = await getSettings();
+  const preferred = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
+  await loadLanguageMessages(preferred);
+}
 
 function t(key, substitutions, fallback) {
+  const override = getOverrideMessage(key, substitutions);
+  if (override) {
+    return override;
+  }
+
   const message = chrome.i18n.getMessage(key, substitutions);
   if (message) {
     return message;
@@ -260,6 +320,7 @@ async function loadSettings() {
     ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
     : t("placeholderApiKey", undefined, "sk-...");
   ui.model.value = settings.model || "gpt-4.1-mini";
+  ui.language.value = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
   ui.configSummary.textContent = summarizeConfig(settings);
   const savedStoreId = settings.vectorStoreId || "";
   const savedStoreName = settings.vectorStoreName || t("selectedFileDatabase", undefined, "Selected file database");
@@ -335,6 +396,12 @@ async function createVectorStore() {
   if (!name) {
     throw new Error(t("errEnterNewDatabaseName", undefined, "Enter a name for the new file database."));
   }
+  const settings = await getSettings();
+  const typedApiKey = ui.apiKey.value.trim();
+  const hasAnyApiKey = hasConfiguredApiKey(settings) || Boolean(typedApiKey);
+  if (!hasAnyApiKey) {
+    throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
+  }
 
   const response = await runtimeSendMessage({
     type: "VECTOR_STORES_CREATE",
@@ -355,14 +422,8 @@ async function createVectorStore() {
 
 async function validateApiKeyBeforeSave(existingSettings) {
   const typedApiKey = ui.apiKey.value.trim();
-  const hasSavedKey = hasConfiguredApiKey(existingSettings);
-
-  if (!typedApiKey && hasSavedKey) {
+  if (!typedApiKey) {
     return;
-  }
-
-  if (!typedApiKey && !hasSavedKey) {
-    throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
   }
 
   const payload = {
@@ -472,6 +533,7 @@ async function deleteSelectedVectorStore() {
 async function saveSettings() {
   const existingSettings = await getSettings();
   const typedApiKey = ui.apiKey.value.trim();
+  const language = SUPPORTED_LANGUAGE_OVERRIDES.has(ui.language.value) ? ui.language.value : "default";
 
   let apiKeyEncrypted = existingSettings.apiKeyEncrypted || null;
   if (typedApiKey) {
@@ -482,7 +544,8 @@ async function saveSettings() {
     apiKeyEncrypted,
     vectorStoreId: ui.vectorStoreId.value.trim(),
     vectorStoreName: (cachedVectorStores.find((store) => store.id === ui.vectorStoreId.value) || {}).name || "",
-    model: ui.model.value || "gpt-4.1-mini"
+    model: ui.model.value || "gpt-4.1-mini",
+    language
   };
 
   await storageSet({ [SETTINGS_KEY]: settings });
@@ -491,16 +554,16 @@ async function saveSettings() {
   ui.apiKey.placeholder = hasConfiguredApiKey(settings)
     ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
     : t("placeholderApiKey", undefined, "sk-...");
+  await loadLanguageMessages(language);
+  applyI18nToDom();
+  ui.model.value = settings.model || "gpt-4.1-mini";
+  ui.language.value = language;
+  updateStoreActionsState();
   ui.configSummary.textContent = summarizeConfig(settings);
 }
 
 function validateInputs(existingSettings) {
-  const typedApiKey = ui.apiKey.value.trim();
-  const hasSavedKey = hasConfiguredApiKey(existingSettings);
-
-  if (!typedApiKey && !hasSavedKey) {
-    throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
-  }
+  void existingSettings;
 }
 
 async function ensureConfigured() {
@@ -806,8 +869,11 @@ ui.saveBtn.addEventListener("click", async () => {
 ui.fillBtn.addEventListener("click", startFill);
 
 document.addEventListener("DOMContentLoaded", () => {
-  applyI18nToDom();
-  loadSettings()
+  initializeLanguageOverride()
+    .then(() => {
+      applyI18nToDom();
+      return loadSettings();
+    })
     .then(() => refreshFillAvailability())
     .catch((error) => {
       setStatus((error && error.message) || t("errFailedLoadSettings", undefined, "Failed to load settings."), true);

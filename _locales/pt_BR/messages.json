@@ -71,6 +71,21 @@
   "labelModel": {
     "message": "Modelo"
   },
+  "labelLanguage": {
+    "message": "Idioma"
+  },
+  "optionLanguageDefault": {
+    "message": "Padrao do sistema"
+  },
+  "optionLanguageEn": {
+    "message": "Ingles"
+  },
+  "optionLanguagePtBr": {
+    "message": "Portugues (Brasil)"
+  },
+  "optionLanguageEs": {
+    "message": "Espanhol"
+  },
   "modelRecommended": {
     "message": "gpt-4.1-mini (Recomendado)"
   },
