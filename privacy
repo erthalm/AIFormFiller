@@ -1,0 +1,54 @@
+# Privacy Policy – AI Form Filler (Chrome Extension)
+**Effective date:** February 22, 2026
+
+## 1) Overview (Single Purpose)
+AI Form Filler helps users populate web form fields by retrieving relevant information from user-provided documents via the OpenAI API and inserting suggested values into form fields. The extension performs form-filling actions only when the user initiates them (for example, clicking “Fill Current Form” or a similar button).
+
+## 2) Data We Handle
+Depending on how you use the extension, it may handle the following categories of data:
+
+### A) Authentication Information
+- **OpenAI API Key:** Users may enter an OpenAI API key to enable API requests. The API key is stored locally in the user’s browser (Chrome storage) in encrypted form (AES-GCM) and is used only to authenticate requests to the OpenAI API.
+
+### B) User-Provided Content
+- **Documents/Files You Upload:** If users upload files through the extension, those files (and their contents) are transmitted to OpenAI API endpoints to enable document-based retrieval and form-filling. The extension does not upload files to any developer-controlled server.
+
+### C) Website / Form Field Metadata (Limited Site Content)
+- When the user triggers a fill action, the extension reads limited metadata from form fields on the current page (such as field label text, name/id attributes, placeholder text, field type, “required” indicators, and select options if applicable). This metadata may be sent to the OpenAI API to generate suggested values.
+
+### D) Local Settings
+- The extension stores local configuration (such as selected database/vector store identifiers, model/settings, and UI preferences) in Chrome storage so the user’s setup persists between sessions.
+
+## 3) How We Use Data
+We use the handled data only to:
+- Provide the extension’s functionality (detect fillable fields and insert suggested values);
+- Retrieve suggestions from the OpenAI API based on user-provided documents;
+- Perform user-initiated document operations (for example, listing, uploading, updating, or deleting documents) via the OpenAI API;
+- Provide support when users contact us (only if users choose to share information such as logs or screenshots).
+
+## 4) Data Sharing / Transfers
+- **OpenAI:** The extension sends data to OpenAI API endpoints (api.openai.com) when the user performs actions in the extension UI (for example, filling fields, uploading files, listing databases).
+- **No sale of data:** We do not sell user data.
+- **No unrelated use:** We do not use or transfer user data for purposes unrelated to the extension’s single purpose.
+- **No creditworthiness/lending:** We do not use or transfer user data to determine creditworthiness or for lending decisions.
+
+## 5) Data Retention
+- **Local storage:** The encrypted API key and configuration remain in the user’s browser until the user deletes them (for example, via extension settings, clearing extension storage, or uninstalling the extension).
+- **OpenAI retention:** Any data transmitted to OpenAI (including uploaded files) is subject to OpenAI’s retention and deletion controls/policies. Users can delete uploaded files via the extension (if available) or via their OpenAI account/tools.
+
+## 6) Security
+- The extension stores the OpenAI API key locally in encrypted form (AES-GCM).
+- Data sent to OpenAI is transmitted over HTTPS.
+- We do not operate a separate developer backend to store user files or API keys.
+
+## 7) User Choices and Controls
+- **User initiation:** The extension sends requests to OpenAI only when the user initiates an action in the extension.
+- **Delete local data:** Users can clear the extension’s local storage or uninstall the extension to remove locally stored settings.
+- **Delete uploaded files:** Users can delete files via the extension (if the feature is present) or through OpenAI’s tools.
+
+## 8) Changes to this Policy
+We may update this policy as the extension evolves. We will update the “Effective date” and publish the revised version at the same URL.
+
+## 9) Contact
+**Developer:** Marcelo Erthal  
+**Support email:** AIFormFill@outlook.com
