@@ -1,0 +1,392 @@
+{
+  "extName": {
+    "message": "AI Form Filler (Busca em Arquivos)"
+  },
+  "extDescription": {
+    "message": "Preenche formularios da web usando respostas recuperadas dos seus documentos do OpenAI File Search."
+  },
+  "actionTitle": {
+    "message": "AI Form Filler"
+  },
+  "popupTitle": {
+    "message": "AI Form Filler"
+  },
+  "badgeReady": {
+    "message": "Pronto"
+  },
+  "labelFileDatabase": {
+    "message": "Base de Arquivos"
+  },
+  "btnRefresh": {
+    "message": "Atualizar"
+  },
+  "btnFillCurrentForm": {
+    "message": "Preencher Formulario Atual"
+  },
+  "btnFiles": {
+    "message": "Arquivos"
+  },
+  "btnConfiguration": {
+    "message": "Configuracao"
+  },
+  "titleFieldProgress": {
+    "message": "Progresso dos Campos"
+  },
+  "hintFieldProgress": {
+    "message": "Cada campo  buscado nos seus documentos do OpenAI File Search e preenchido em sequencia."
+  },
+  "titleConfiguration": {
+    "message": "Configuracao"
+  },
+  "labelApiKey": {
+    "message": "Chave da API OpenAI"
+  },
+  "placeholderApiKey": {
+    "message": "sk-..."
+  },
+  "sectionCreateDatabase": {
+    "message": "Criar Base"
+  },
+  "placeholderNewDatabaseName": {
+    "message": "Nome da nova base de arquivos"
+  },
+  "btnCreate": {
+    "message": "Criar"
+  },
+  "sectionDeleteDatabase": {
+    "message": "Excluir Base"
+  },
+  "labelTarget": {
+    "message": "Alvo"
+  },
+  "hintDeleteDatabase": {
+    "message": "Isso remove a base e todos os arquivos dela."
+  },
+  "btnDeleteDatabase": {
+    "message": "Excluir Base"
+  },
+  "btnDeleteDatabaseNamed": {
+    "message": "Excluir \"$1\""
+  },
+  "labelModel": {
+    "message": "Modelo"
+  },
+  "modelRecommended": {
+    "message": "gpt-4.1-mini (Recomendado)"
+  },
+  "btnBack": {
+    "message": "Voltar"
+  },
+  "btnSave": {
+    "message": "Salvar"
+  },
+  "hintStoredLocally": {
+    "message": "Armazenado localmente no armazenamento da extensao do Chrome."
+  },
+  "titleFiles": {
+    "message": "Arquivos"
+  },
+  "labelAddFile": {
+    "message": "Adicionar Arquivo"
+  },
+  "btnUpload": {
+    "message": "Enviar"
+  },
+  "titleCurrentFiles": {
+    "message": "Arquivos Atuais"
+  },
+  "hintUpdateFile": {
+    "message": "Atualizar = substituir o arquivo por uma nova versao."
+  },
+  "summaryConfiguredModel": {
+    "message": "Configurado. Modelo: $1"
+  },
+  "summaryNotConfigured": {
+    "message": "Configuracao incompleta. Abra Configuracao."
+  },
+  "none": {
+    "message": "Nenhum"
+  },
+  "placeholderApiKeyStored": {
+    "message": "Armazenada com seguranca (deixe em branco para manter a atual)"
+  },
+  "selectedFileDatabase": {
+    "message": "Base de arquivos selecionada"
+  },
+  "selectFileDatabase": {
+    "message": "Selecione uma base de arquivos..."
+  },
+  "noFileDatabasesAvailable": {
+    "message": "Nenhuma base de arquivos disponivel"
+  },
+  "unnamedFileDatabase": {
+    "message": "Base de arquivos sem nome"
+  },
+  "previouslySelectedVectorStore": {
+    "message": "Vector store selecionado anteriormente"
+  },
+  "statusAddApiKeyThenRefresh": {
+    "message": "Adicione uma chave de API em Configuracao e atualize as bases de arquivos."
+  },
+  "errCouldNotLoadFileDatabases": {
+    "message": "Nao foi possivel carregar as bases de arquivos."
+  },
+  "statusLoadedFileDatabasesCount": {
+    "message": "$1 base(s) de arquivos carregada(s)."
+  },
+  "errEnterNewDatabaseName": {
+    "message": "Digite um nome para a nova base de arquivos."
+  },
+  "errCouldNotCreateFileDatabase": {
+    "message": "Nao foi possivel criar a base de arquivos."
+  },
+  "statusFileDatabaseCreated": {
+    "message": "Base de arquivos criada."
+  },
+  "errApiKeyRequired": {
+    "message": "A chave da API OpenAI  obrigatoria."
+  },
+  "errInvalidApiKey": {
+    "message": "Chave da API OpenAI invalida."
+  },
+  "errSelectFileDatabaseFirst": {
+    "message": "Selecione primeiro uma base de arquivos."
+  },
+  "selectedFileDatabaseLower": {
+    "message": "base de arquivos selecionada"
+  },
+  "errCouldNotPreviewDeletion": {
+    "message": "Nao foi possivel preparar a previa de exclusao."
+  },
+  "confirmDeleteDatabaseWithFiles": {
+    "message": "Excluir \"$1\"?\n\nIsso tambem excluira $2 arquivo(s) nesta base de arquivos.\nEsta acao nao pode ser desfeita."
+  },
+  "statusDeletingDatabaseAndFiles": {
+    "message": "Excluindo base de arquivos e arquivos..."
+  },
+  "errCouldNotDeleteFileDatabase": {
+    "message": "Nao foi possivel excluira a base de arquivos."
+  },
+  "statusDeletedDatabaseAndFiles": {
+    "message": "\"$1\" e $2 arquivo(s) excluidos."
+  },
+  "errSetApiKeyAndDatabaseFirst": {
+    "message": "Defina a chave de API e a Base de Arquivos em Configuracao primeiro."
+  },
+  "statusPreparingAutofill": {
+    "message": "Preparando preenchimento automatico..."
+  },
+  "errUnableFindActiveTab": {
+    "message": "Nao foi possivel encontrar a aba ativa do navegador."
+  },
+  "errFailedToStartAutofill": {
+    "message": "Falha ao iniciar o preenchimento automatico."
+  },
+  "statusAutofillStarted": {
+    "message": "Preenchimento automatico iniciado. Processando campos..."
+  },
+  "errUnexpected": {
+    "message": "Erro inesperado."
+  },
+  "noFilesAvailable": {
+    "message": "Nenhum arquivo disponivel."
+  },
+  "fileNameUnavailable": {
+    "message": "Nome do arquivo indisponivel"
+  },
+  "unknown": {
+    "message": "desconhecido"
+  },
+  "fileMetaStatusCreated": {
+    "message": "status: $1 | criado: $2"
+  },
+  "btnUpdate": {
+    "message": "Atualizar"
+  },
+  "btnDelete": {
+    "message": "Excluir"
+  },
+  "statusLoadingFiles": {
+    "message": "Carregando arquivos..."
+  },
+  "errFailedLoadFiles": {
+    "message": "Falha ao carregar arquivos."
+  },
+  "statusLoadedFilesCount": {
+    "message": "$1 arquivo(s) carregado(s)."
+  },
+  "errChooseFileFirst": {
+    "message": "Escolha um arquivo primeiro."
+  },
+  "statusUploadingFile": {
+    "message": "Enviando arquivo..."
+  },
+  "errUploadFailed": {
+    "message": "Falha no envio."
+  },
+  "statusFileUploadedAttached": {
+    "message": "Arquivo enviado e anexado."
+  },
+  "statusDeletingFile": {
+    "message": "Excluindo arquivo..."
+  },
+  "errDeleteFailed": {
+    "message": "Falha ao excluira."
+  },
+  "statusFileDeleted": {
+    "message": "Arquivo excluido."
+  },
+  "statusUpdatingFile": {
+    "message": "Atualizando arquivo..."
+  },
+  "errUpdateFailed": {
+    "message": "Falha na atualizacao."
+  },
+  "statusFileUpdated": {
+    "message": "Arquivo atualizado."
+  },
+  "errConfigurationIncomplete": {
+    "message": "Configuracao incompleta."
+  },
+  "errCouldNotSaveFileDatabaseSelection": {
+    "message": "Nao foi possivel salvar a selecao da base de arquivos."
+  },
+  "errCouldNotSaveSettings": {
+    "message": "Nao foi possivel salvar as configuracoes."
+  },
+  "errFailedLoadSettings": {
+    "message": "Falha ao carregar configuracoes."
+  },
+  "contentFillWithAi": {
+    "message": "Preencher com IA"
+  },
+  "contentFieldUnavailable": {
+    "message": "Campo indisponivel"
+  },
+  "contentFilling": {
+    "message": "Preenchendo..."
+  },
+  "contentSearchingDocs": {
+    "message": "Buscando nos documentos..."
+  },
+  "contentCouldNotFetchFieldValue": {
+    "message": "Nao foi possivel obter valor para este campo."
+  },
+  "contentNoAnswerFound": {
+    "message": "Nenhuma resposta encontrada"
+  },
+  "contentUnableApplyAnswer": {
+    "message": "Nao foi possivel aplicar a resposta ao campo."
+  },
+  "contentFieldFilled": {
+    "message": "Campo preenchido"
+  },
+  "contentFillFailed": {
+    "message": "Falha no preenchimento"
+  },
+  "actionTitleFormDetected": {
+    "message": "AI Form Filler: formulario detectado"
+  },
+  "actionTitleNoFormDetected": {
+    "message": "AI Form Filler: nenhum formulario preenchvel nesta pagina"
+  },
+  "errAuthFailedCheckApiKey": {
+    "message": "Falha de autenticacao. Verifique sua chave de API."
+  },
+  "errRateLimitedRetry": {
+    "message": "Limite de requisicoes da OpenAI atingido. Tente novamente em instantes."
+  },
+  "errOpenAiService": {
+    "message": "Erro no servico da OpenAI. Tente novamente."
+  },
+  "errOpenAiStatus": {
+    "message": "A requisicao OpenAI falhou com status $1."
+  },
+  "errOpenAiTimeout": {
+    "message": "Tempo limite da requisicao OpenAI excedido."
+  },
+  "errInvalidFilePayload": {
+    "message": "Payload de arquivo invalido."
+  },
+  "errApiKeyMissingPopup": {
+    "message": "Chave da API OpenAI ausente. Adicione no popup da extensao."
+  },
+  "errVectorStoreMissingPopup": {
+    "message": "Vector Store ID ausente. Adicione no popup da extensao."
+  },
+  "statusNoEditableFields": {
+    "message": "Nenhum campo editavel compativel foi encontrado nesta pagina."
+  },
+  "statusFoundFieldsFilling": {
+    "message": "$1 campo(s) encontrado(s). Preenchendo agora..."
+  },
+  "progressSearching": {
+    "message": "[$1/$2] Buscando: $3"
+  },
+  "requestFailed": {
+    "message": "requisicao falhou"
+  },
+  "progressError": {
+    "message": "[$1/$2] Erro: $3 -> $4"
+  },
+  "progressNotFound": {
+    "message": "[$1/$2] No encontrado: $3"
+  },
+  "unknownError": {
+    "message": "erro desconhecido"
+  },
+  "progressCouldNotFill": {
+    "message": "[$1/$2] Nao foi possivel preencher: $3 ($4)"
+  },
+  "progressFilled": {
+    "message": "[$1/$2] Preenchido: $3"
+  },
+  "statusCompletedFilledSkipped": {
+    "message": "Concluido. Preenchidos $1, ignorados $2."
+  },
+  "errInvalidFieldPayload": {
+    "message": "Payload de campo invalido."
+  },
+  "errMissingFileId": {
+    "message": "ID do arquivo ausente."
+  },
+  "errNameRequired": {
+    "message": "Nome  obrigatorio."
+  },
+  "errNoFileDatabaseSelected": {
+    "message": "Nenhuma base de arquivos selecionada."
+  },
+  "errApiKeyMissing": {
+    "message": "Chave da API OpenAI ausente."
+  },
+  "errInvalidTabId": {
+    "message": "Identificador de aba invalido."
+  },
+  "errAutofillFailed": {
+    "message": "Falha no preenchimento automatico."
+  },
+  "errCouldNotFillField": {
+    "message": "Nao foi possivel preencher o campo."
+  },
+  "errCouldNotListFiles": {
+    "message": "Nao foi possivel listar arquivos."
+  },
+  "errCouldNotAddFile": {
+    "message": "Nao foi possivel adicionar arquivo."
+  },
+  "errCouldNotDeleteFile": {
+    "message": "Nao foi possivel excluira arquivo."
+  },
+  "errCouldNotUpdateFile": {
+    "message": "Nao foi possivel atualizar arquivo."
+  },
+  "errCouldNotListVectorStores": {
+    "message": "Nao foi possivel listar vector stores."
+  },
+  "errCouldNotCreateVectorStore": {
+    "message": "Nao foi possivel criar vector store."
+  },
+  "errCouldNotPrepareDeletionPreview": {
+    "message": "Nao foi possivel preparar a previa de exclusao."
+  }
+}

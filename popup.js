@@ -39,6 +39,40 @@ let pendingReplaceFileId = null;
 let cachedVectorStores = [];
 let hasFillableFormOnPage = false;
 
+function t(key, substitutions, fallback) {
+  const message = chrome.i18n.getMessage(key, substitutions);
+  if (message) {
+    return message;
+  }
+  return fallback || key;
+}
+
+function applyI18nToDom() {
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    if (!key) {
+      return;
+    }
+    const msg = t(key, undefined, "");
+    if (msg) {
+      el.textContent = msg;
+    }
+  });
+
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (!key) {
+      return;
+    }
+    const msg = t(key, undefined, "");
+    if (msg) {
+      el.setAttribute("placeholder", msg);
+    }
+  });
+
+  document.title = t("popupTitle", undefined, document.title);
+}
+
 function storageGet(keys) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(keys, (result) => {
@@ -169,10 +203,10 @@ function summarizeConfig(settings) {
   const model = settings.model || "gpt-4.1-mini";
 
   if (hasKey && hasStore) {
-    return `Configured. Model: ${model}`;
+    return t("summaryConfiguredModel", [model], `Configured. Model: ${model}`);
   }
 
-  return "Not fully configured. Open Configuration.";
+  return t("summaryNotConfigured", undefined, "Not fully configured. Open Configuration.");
 }
 
 function updateStoreActionsState() {
@@ -182,17 +216,17 @@ function updateStoreActionsState() {
   ui.openFilesBtn.disabled = !hasSelection;
 
   const selectedOption = ui.vectorStoreId.options[ui.vectorStoreId.selectedIndex];
-  const selectedName = hasSelection && selectedOption ? selectedOption.textContent : "None";
+  const selectedName = hasSelection && selectedOption ? selectedOption.textContent : t("none", undefined, "None");
   ui.selectedStoreForDelete.textContent = selectedName;
 
   if (!hasSelection) {
-    ui.deleteStoreBtn.textContent = "Delete Database";
+    ui.deleteStoreBtn.textContent = t("btnDeleteDatabase", undefined, "Delete Database");
     return;
   }
 
   const normalizedName = selectedName.replace(/\s+/g, " ").trim();
   const shortName = normalizedName.length > 26 ? `${normalizedName.slice(0, 26)}...` : normalizedName;
-  ui.deleteStoreBtn.textContent = `Delete "${shortName}"`;
+  ui.deleteStoreBtn.textContent = t("btnDeleteDatabaseNamed", [shortName], `Delete "${shortName}"`);
 }
 
 async function refreshFillAvailability() {
@@ -222,11 +256,13 @@ async function refreshFillAvailability() {
 async function loadSettings() {
   const settings = await getSettings();
   ui.apiKey.value = "";
-  ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
+  ui.apiKey.placeholder = hasConfiguredApiKey(settings)
+    ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
+    : t("placeholderApiKey", undefined, "sk-...");
   ui.model.value = settings.model || "gpt-4.1-mini";
   ui.configSummary.textContent = summarizeConfig(settings);
   const savedStoreId = settings.vectorStoreId || "";
-  const savedStoreName = settings.vectorStoreName || "Selected file database";
+  const savedStoreName = settings.vectorStoreName || t("selectedFileDatabase", undefined, "Selected file database");
   cachedVectorStores = savedStoreId ? [{ id: savedStoreId, name: savedStoreName }] : [];
   populateVectorStoreSelect(cachedVectorStores, savedStoreId);
 }
@@ -236,20 +272,22 @@ function populateVectorStoreSelect(stores, selectedId) {
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = stores.length ? "Select a file database..." : "No file databases available";
+  placeholder.textContent = stores.length
+    ? t("selectFileDatabase", undefined, "Select a file database...")
+    : t("noFileDatabasesAvailable", undefined, "No file databases available");
   ui.vectorStoreId.appendChild(placeholder);
 
   stores.forEach((store) => {
     const option = document.createElement("option");
     option.value = store.id;
-    option.textContent = store.name || "Unnamed file database";
+    option.textContent = store.name || t("unnamedFileDatabase", undefined, "Unnamed file database");
     ui.vectorStoreId.appendChild(option);
   });
 
   if (selectedId && !stores.some((store) => store.id === selectedId)) {
     const fallback = document.createElement("option");
     fallback.value = selectedId;
-    fallback.textContent = "Previously selected vector store";
+    fallback.textContent = t("previouslySelectedVectorStore", undefined, "Previously selected vector store");
     ui.vectorStoreId.appendChild(fallback);
   }
 
@@ -266,7 +304,7 @@ async function refreshVectorStores(selectedId) {
   if (!hasAnyApiKey) {
     cachedVectorStores = [];
     populateVectorStoreSelect([], preferredId);
-    setStatus("Add an API key in Configuration, then refresh file databases.", true);
+    setStatus(t("statusAddApiKeyThenRefresh", undefined, "Add an API key in Configuration, then refresh file databases."), true);
     return;
   }
 
@@ -277,16 +315,16 @@ async function refreshVectorStores(selectedId) {
       apiKey: typedApiKey || undefined
     });
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Could not load file databases.");
+      throw new Error((response && response.error) || t("errCouldNotLoadFileDatabases", undefined, "Could not load file databases."));
     }
 
     cachedVectorStores = Array.isArray(response.vectorStores) ? response.vectorStores : [];
     populateVectorStoreSelect(cachedVectorStores, preferredId);
-    setStatus(`Loaded ${cachedVectorStores.length} file database(s).`, false);
+    setStatus(t("statusLoadedFileDatabasesCount", [String(cachedVectorStores.length)], `Loaded ${cachedVectorStores.length} file database(s).`), false);
   } catch (error) {
     cachedVectorStores = [];
     populateVectorStoreSelect([], preferredId);
-    setStatus((error && error.message) || "Could not load file databases.", true);
+    setStatus((error && error.message) || t("errCouldNotLoadFileDatabases", undefined, "Could not load file databases."), true);
   } finally {
     ui.refreshStoresBtn.disabled = false;
   }
@@ -295,7 +333,7 @@ async function refreshVectorStores(selectedId) {
 async function createVectorStore() {
   const name = (ui.newStoreName.value || "").trim();
   if (!name) {
-    throw new Error("Enter a name for the new file database.");
+    throw new Error(t("errEnterNewDatabaseName", undefined, "Enter a name for the new file database."));
   }
 
   const response = await runtimeSendMessage({
@@ -304,7 +342,7 @@ async function createVectorStore() {
   });
 
   if (!response || !response.ok) {
-    throw new Error((response && response.error) || "Could not create file database.");
+    throw new Error((response && response.error) || t("errCouldNotCreateFileDatabase", undefined, "Could not create file database."));
   }
 
   ui.newStoreName.value = "";
@@ -312,7 +350,7 @@ async function createVectorStore() {
   if (response.vectorStoreId) {
     ui.vectorStoreId.value = response.vectorStoreId;
   }
-  setStatus("File database created.", false);
+  setStatus(t("statusFileDatabaseCreated", undefined, "File database created."), false);
 }
 
 async function validateApiKeyBeforeSave(existingSettings) {
@@ -324,7 +362,7 @@ async function validateApiKeyBeforeSave(existingSettings) {
   }
 
   if (!typedApiKey && !hasSavedKey) {
-    throw new Error("OpenAI API key is required.");
+    throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
   }
 
   const payload = {
@@ -334,7 +372,7 @@ async function validateApiKeyBeforeSave(existingSettings) {
 
   const response = await runtimeSendMessage(payload);
   if (!response || !response.ok) {
-    throw new Error((response && response.error) || "Invalid OpenAI API key.");
+    throw new Error((response && response.error) || t("errInvalidApiKey", undefined, "Invalid OpenAI API key."));
   }
 }
 
@@ -385,43 +423,50 @@ async function clearStoredVectorStoreIfMatches(storeId) {
 async function deleteSelectedVectorStore() {
   const selectedStoreId = (ui.vectorStoreId.value || "").trim();
   if (!selectedStoreId) {
-    throw new Error("Select a file database first.");
+    throw new Error(t("errSelectFileDatabaseFirst", undefined, "Select a file database first."));
   }
 
   const selectedOption = ui.vectorStoreId.options[ui.vectorStoreId.selectedIndex];
-  const selectedStoreName = (selectedOption && selectedOption.textContent) || "selected file database";
+  const selectedStoreName = (selectedOption && selectedOption.textContent) || t("selectedFileDatabaseLower", undefined, "selected file database");
 
   const preview = await runtimeSendMessage({
     type: "VECTOR_STORE_DELETE_PREVIEW",
     vectorStoreId: selectedStoreId
   });
   if (!preview || !preview.ok) {
-    throw new Error((preview && preview.error) || "Could not preview deletion.");
+    throw new Error((preview && preview.error) || t("errCouldNotPreviewDeletion", undefined, "Could not preview deletion."));
   }
 
   const fileCount = Number(preview.fileCount || 0);
   if (fileCount > 0) {
     const shouldDelete = window.confirm(
-      `Delete "${selectedStoreName}"?\n\nThis will also delete ${fileCount} file(s) in this file database.\nThis action cannot be undone.`
+      t(
+        "confirmDeleteDatabaseWithFiles",
+        [selectedStoreName, String(fileCount)],
+        `Delete "${selectedStoreName}"?\n\nThis will also delete ${fileCount} file(s) in this file database.\nThis action cannot be undone.`
+      )
     );
     if (!shouldDelete) {
       return;
     }
   }
 
-  setStatus("Deleting file database and files...", false);
+  setStatus(t("statusDeletingDatabaseAndFiles", undefined, "Deleting file database and files..."), false);
   const response = await runtimeSendMessage({
     type: "VECTOR_STORE_DELETE",
     vectorStoreId: selectedStoreId
   });
   if (!response || !response.ok) {
-    throw new Error((response && response.error) || "Could not delete file database.");
+    throw new Error((response && response.error) || t("errCouldNotDeleteFileDatabase", undefined, "Could not delete file database."));
   }
 
   await clearStoredVectorStoreIfMatches(selectedStoreId);
   await refreshVectorStores("");
   ui.vectorStoreId.value = "";
-  setStatus(`Deleted "${selectedStoreName}" and ${fileCount} file(s).`, false);
+  setStatus(
+    t("statusDeletedDatabaseAndFiles", [selectedStoreName, String(fileCount)], `Deleted "${selectedStoreName}" and ${fileCount} file(s).`),
+    false
+  );
 }
 
 async function saveSettings() {
@@ -443,7 +488,9 @@ async function saveSettings() {
   await storageSet({ [SETTINGS_KEY]: settings });
 
   ui.apiKey.value = "";
-  ui.apiKey.placeholder = hasConfiguredApiKey(settings) ? "Stored securely (leave blank to keep current)" : "sk-...";
+  ui.apiKey.placeholder = hasConfiguredApiKey(settings)
+    ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
+    : t("placeholderApiKey", undefined, "sk-...");
   ui.configSummary.textContent = summarizeConfig(settings);
 }
 
@@ -452,7 +499,7 @@ function validateInputs(existingSettings) {
   const hasSavedKey = hasConfiguredApiKey(existingSettings);
 
   if (!typedApiKey && !hasSavedKey) {
-    throw new Error("OpenAI API key is required.");
+    throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
   }
 }
 
@@ -462,7 +509,7 @@ async function ensureConfigured() {
 
   if (!hasConfiguredApiKey(settings) || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
     switchView("settings");
-    throw new Error("Set API key and File Database in Configuration first.");
+    throw new Error(t("errSetApiKeyAndDatabaseFirst", undefined, "Set API key and File Database in Configuration first."));
   }
 }
 
@@ -485,13 +532,13 @@ function runtimeSendMessage(message) {
 
 async function startFill() {
   try {
-    setStatus("Preparing autofill...", false);
+    setStatus(t("statusPreparingAutofill", undefined, "Preparing autofill..."), false);
     clearLog();
     await ensureConfigured();
 
     const activeTab = await getActiveTab();
     if (!activeTab || !activeTab.id) {
-      throw new Error("Unable to find the active browser tab.");
+      throw new Error(t("errUnableFindActiveTab", undefined, "Unable to find the active browser tab."));
     }
 
     const response = await runtimeSendMessage({
@@ -500,12 +547,12 @@ async function startFill() {
     });
 
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Failed to start autofill.");
+      throw new Error((response && response.error) || t("errFailedToStartAutofill", undefined, "Failed to start autofill."));
     }
 
-    setStatus("Autofill started. Processing fields...", false);
+    setStatus(t("statusAutofillStarted", undefined, "Autofill started. Processing fields..."), false);
   } catch (error) {
-    setStatus((error && error.message) || "Unexpected error.", true);
+    setStatus((error && error.message) || t("errUnexpected", undefined, "Unexpected error."), true);
   }
 }
 
@@ -531,7 +578,7 @@ function renderFiles(files) {
   if (!files.length) {
     const item = document.createElement("li");
     item.className = "file-item";
-    item.textContent = "No files available.";
+    item.textContent = t("noFilesAvailable", undefined, "No files available.");
     ui.filesList.appendChild(item);
     return;
   }
@@ -542,11 +589,15 @@ function renderFiles(files) {
 
     const title = document.createElement("div");
     title.className = "file-title";
-    title.textContent = file.filename || file.name || "File name unavailable";
+    title.textContent = file.filename || file.name || t("fileNameUnavailable", undefined, "File name unavailable");
 
     const meta = document.createElement("div");
     meta.className = "file-meta";
-    meta.textContent = `status: ${file.status || "unknown"} | created: ${formatDate(file.created_at)}`;
+    meta.textContent = t(
+      "fileMetaStatusCreated",
+      [file.status || t("unknown", undefined, "unknown"), formatDate(file.created_at)],
+      `status: ${file.status || "unknown"} | created: ${formatDate(file.created_at)}`
+    );
 
     const rowActions = document.createElement("div");
     rowActions.className = "row-actions";
@@ -554,7 +605,7 @@ function renderFiles(files) {
     const replaceBtn = document.createElement("button");
     replaceBtn.className = "secondary";
     replaceBtn.type = "button";
-    replaceBtn.textContent = "Update";
+    replaceBtn.textContent = t("btnUpdate", undefined, "Update");
     replaceBtn.addEventListener("click", () => {
       pendingReplaceFileId = file.file_id || file.id;
       ui.replaceFileInput.value = "";
@@ -564,7 +615,7 @@ function renderFiles(files) {
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "secondary";
     deleteBtn.type = "button";
-    deleteBtn.textContent = "Delete";
+    deleteBtn.textContent = t("btnDelete", undefined, "Delete");
     deleteBtn.addEventListener("click", () => {
       handleDeleteFile(file.file_id || file.id);
     });
@@ -583,18 +634,18 @@ function renderFiles(files) {
 async function refreshFiles() {
   try {
     await ensureConfigured();
-    setFilesStatus("Loading files...", false);
+    setFilesStatus(t("statusLoadingFiles", undefined, "Loading files..."), false);
 
     const response = await runtimeSendMessage({ type: "VECTOR_FILES_LIST" });
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Failed to load files.");
+      throw new Error((response && response.error) || t("errFailedLoadFiles", undefined, "Failed to load files."));
     }
 
     renderFiles(response.files || []);
-    setFilesStatus(`Loaded ${response.files.length} file(s).`, false);
+    setFilesStatus(t("statusLoadedFilesCount", [String(response.files.length)], `Loaded ${response.files.length} file(s).`), false);
   } catch (error) {
     renderFiles([]);
-    setFilesStatus((error && error.message) || "Failed to load files.", true);
+    setFilesStatus((error && error.message) || t("errFailedLoadFiles", undefined, "Failed to load files."), true);
   }
 }
 
@@ -604,46 +655,46 @@ async function handleUploadFile() {
 
     const file = ui.newFileInput.files && ui.newFileInput.files[0];
     if (!file) {
-      throw new Error("Choose a file first.");
+      throw new Error(t("errChooseFileFirst", undefined, "Choose a file first."));
     }
 
-    setFilesStatus("Uploading file...", false);
+    setFilesStatus(t("statusUploadingFile", undefined, "Uploading file..."), false);
     const payload = await fileToPayload(file);
     const response = await runtimeSendMessage({ type: "VECTOR_FILES_ADD", file: payload });
 
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Upload failed.");
+      throw new Error((response && response.error) || t("errUploadFailed", undefined, "Upload failed."));
     }
 
     ui.newFileInput.value = "";
-    setFilesStatus("File uploaded and attached.", false);
+    setFilesStatus(t("statusFileUploadedAttached", undefined, "File uploaded and attached."), false);
     await refreshFiles();
   } catch (error) {
-    setFilesStatus((error && error.message) || "Upload failed.", true);
+    setFilesStatus((error && error.message) || t("errUploadFailed", undefined, "Upload failed."), true);
   }
 }
 
 async function handleDeleteFile(fileId) {
   try {
     await ensureConfigured();
-    setFilesStatus("Deleting file...", false);
+    setFilesStatus(t("statusDeletingFile", undefined, "Deleting file..."), false);
 
     const response = await runtimeSendMessage({ type: "VECTOR_FILES_DELETE", fileId });
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Delete failed.");
+      throw new Error((response && response.error) || t("errDeleteFailed", undefined, "Delete failed."));
     }
 
-    setFilesStatus("File deleted.", false);
+    setFilesStatus(t("statusFileDeleted", undefined, "File deleted."), false);
     await refreshFiles();
   } catch (error) {
-    setFilesStatus((error && error.message) || "Delete failed.", true);
+    setFilesStatus((error && error.message) || t("errDeleteFailed", undefined, "Delete failed."), true);
   }
 }
 
 async function handleReplaceFile(fileId, replacementFile) {
   try {
     await ensureConfigured();
-    setFilesStatus("Updating file...", false);
+    setFilesStatus(t("statusUpdatingFile", undefined, "Updating file..."), false);
 
     const payload = await fileToPayload(replacementFile);
     const response = await runtimeSendMessage({
@@ -653,13 +704,13 @@ async function handleReplaceFile(fileId, replacementFile) {
     });
 
     if (!response || !response.ok) {
-      throw new Error((response && response.error) || "Update failed.");
+      throw new Error((response && response.error) || t("errUpdateFailed", undefined, "Update failed."));
     }
 
-    setFilesStatus("File updated.", false);
+    setFilesStatus(t("statusFileUpdated", undefined, "File updated."), false);
     await refreshFiles();
   } catch (error) {
-    setFilesStatus((error && error.message) || "Update failed.", true);
+    setFilesStatus((error && error.message) || t("errUpdateFailed", undefined, "Update failed."), true);
   }
 }
 
@@ -691,7 +742,7 @@ ui.openFilesBtn.addEventListener("click", async () => {
     switchView("files");
     await refreshFiles();
   } catch (error) {
-    setStatus((error && error.message) || "Configuration is incomplete.", true);
+    setStatus((error && error.message) || t("errConfigurationIncomplete", undefined, "Configuration is incomplete."), true);
   }
 });
 
@@ -708,7 +759,7 @@ ui.refreshStoresBtn.addEventListener("click", async () => {
 ui.vectorStoreId.addEventListener("change", () => {
   updateStoreActionsState();
   persistSelectedVectorStore(ui.vectorStoreId.value).catch((error) => {
-    setStatus((error && error.message) || "Could not save file database selection.", true);
+    setStatus((error && error.message) || t("errCouldNotSaveFileDatabaseSelection", undefined, "Could not save file database selection."), true);
   });
 });
 
@@ -716,7 +767,7 @@ ui.createStoreBtn.addEventListener("click", async () => {
   try {
     await createVectorStore();
   } catch (error) {
-    setStatus((error && error.message) || "Could not create file database.", true);
+    setStatus((error && error.message) || t("errCouldNotCreateFileDatabase", undefined, "Could not create file database."), true);
   }
 });
 
@@ -724,7 +775,7 @@ ui.deleteStoreBtn.addEventListener("click", async () => {
   try {
     await deleteSelectedVectorStore();
   } catch (error) {
-    setStatus((error && error.message) || "Could not delete file database.", true);
+    setStatus((error && error.message) || t("errCouldNotDeleteFileDatabase", undefined, "Could not delete file database."), true);
   }
 });
 
@@ -748,17 +799,18 @@ ui.saveBtn.addEventListener("click", async () => {
     await saveSettings();
     switchView("actions");
   } catch (error) {
-    setStatus((error && error.message) || "Could not save settings.", true);
+    setStatus((error && error.message) || t("errCouldNotSaveSettings", undefined, "Could not save settings."), true);
   }
 });
 
 ui.fillBtn.addEventListener("click", startFill);
 
 document.addEventListener("DOMContentLoaded", () => {
+  applyI18nToDom();
   loadSettings()
     .then(() => refreshFillAvailability())
     .catch((error) => {
-      setStatus((error && error.message) || "Failed to load settings.", true);
+      setStatus((error && error.message) || t("errFailedLoadSettings", undefined, "Failed to load settings."), true);
       updateStoreActionsState();
     });
 });

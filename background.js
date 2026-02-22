@@ -9,6 +9,14 @@ const ACTION_ICON = {
   128: "icon128x128_green.png"
 };
 
+function t(key, substitutions, fallback) {
+  const message = chrome.i18n.getMessage(key, substitutions);
+  if (message) {
+    return message;
+  }
+  return fallback || key;
+}
+
 function storageGet(keys) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(keys, (result) => {
@@ -90,7 +98,9 @@ async function updateActionStateForTabKnownValue(tabId, hasForm) {
   await actionSetIcon({ tabId, path: ACTION_ICON });
   await actionSetTitle({
     tabId,
-    title: hasForm ? "AI Form Filler: form detected" : "AI Form Filler: no fillable form on this page"
+    title: hasForm
+      ? t("actionTitleFormDetected", undefined, "AI Form Filler: form detected")
+      : t("actionTitleNoFormDetected", undefined, "AI Form Filler: no fillable form on this page")
   });
 }
 
@@ -180,15 +190,15 @@ function cleanModelAnswer(answer) {
 
 function classifyHttpError(status) {
   if (status === 401 || status === 403) {
-    return "Authentication failed. Check your API key.";
+    return t("errAuthFailedCheckApiKey", undefined, "Authentication failed. Check your API key.");
   }
   if (status === 429) {
-    return "Rate limited by OpenAI. Please retry shortly.";
+    return t("errRateLimitedRetry", undefined, "Rate limited by OpenAI. Please retry shortly.");
   }
   if (status >= 500) {
-    return "OpenAI service error. Please try again.";
+    return t("errOpenAiService", undefined, "OpenAI service error. Please try again.");
   }
-  return `OpenAI request failed with status ${status}.`;
+  return t("errOpenAiStatus", [String(status)], `OpenAI request failed with status ${status}.`);
 }
 
 function encodeURIComponentSafe(value) {
@@ -285,7 +295,7 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
     return cleanModelAnswer(parseOutputText(json));
   } catch (error) {
     if (error?.name === "AbortError") {
-      throw new Error("OpenAI request timed out.");
+      throw new Error(t("errOpenAiTimeout", undefined, "OpenAI request timed out."));
     }
     throw error;
   } finally {
@@ -295,7 +305,7 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
 
 async function uploadFileToOpenAI({ apiKey, file }) {
   if (!file?.filename || !file?.base64) {
-    throw new Error("Invalid file payload.");
+    throw new Error(t("errInvalidFilePayload", undefined, "Invalid file payload."));
   }
 
   const bytes = base64ToBytes(file.base64);
@@ -465,10 +475,10 @@ async function processAutofill(tabId) {
   const model = settings.model?.trim() || "gpt-4.1-mini";
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!vectorStoreId) {
-    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+    throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
 
   const fieldsResponse = await tabMessage(tabId, { type: "GET_FORM_FIELDS" });
@@ -478,11 +488,19 @@ async function processAutofill(tabId) {
 
   const fields = Array.isArray(fieldsResponse.fields) ? fieldsResponse.fields : [];
   if (!fields.length) {
-    await safeRuntimeMessage({ type: "AUTOFILL_STATUS", message: "No supported editable fields found on this page.", error: false });
+    await safeRuntimeMessage({
+      type: "AUTOFILL_STATUS",
+      message: t("statusNoEditableFields", undefined, "No supported editable fields found on this page."),
+      error: false
+    });
     return;
   }
 
-  await safeRuntimeMessage({ type: "AUTOFILL_STATUS", message: `Found ${fields.length} field(s). Filling now...`, error: false });
+  await safeRuntimeMessage({
+    type: "AUTOFILL_STATUS",
+    message: t("statusFoundFieldsFilling", [String(fields.length)], `Found ${fields.length} field(s). Filling now...`),
+    error: false
+  });
 
   let filled = 0;
   let skipped = 0;
@@ -491,35 +509,62 @@ async function processAutofill(tabId) {
     const field = fields[i];
     const label = fieldDisplayName(field);
 
-    await safeRuntimeMessage({ type: "AUTOFILL_PROGRESS", message: `[${i + 1}/${fields.length}] Searching: ${label}` });
+    await safeRuntimeMessage({
+      type: "AUTOFILL_PROGRESS",
+      message: t("progressSearching", [String(i + 1), String(fields.length), label], `[${i + 1}/${fields.length}] Searching: ${label}`)
+    });
 
     let answer;
     try {
       answer = await queryFieldAnswer({ apiKey, vectorStoreId, model, field });
     } catch (error) {
-      await safeRuntimeMessage({ type: "AUTOFILL_PROGRESS", message: `[${i + 1}/${fields.length}] Error: ${label} -> ${error.message || "request failed"}` });
+      await safeRuntimeMessage({
+        type: "AUTOFILL_PROGRESS",
+        message: t(
+          "progressError",
+          [String(i + 1), String(fields.length), label, error.message || t("requestFailed", undefined, "request failed")],
+          `[${i + 1}/${fields.length}] Error: ${label} -> ${error.message || "request failed"}`
+        )
+      });
       skipped += 1;
       continue;
     }
 
     if (!answer) {
-      await safeRuntimeMessage({ type: "AUTOFILL_PROGRESS", message: `[${i + 1}/${fields.length}] Not found: ${label}` });
+      await safeRuntimeMessage({
+        type: "AUTOFILL_PROGRESS",
+        message: t("progressNotFound", [String(i + 1), String(fields.length), label], `[${i + 1}/${fields.length}] Not found: ${label}`)
+      });
       skipped += 1;
       continue;
     }
 
     const fillResponse = await tabMessage(tabId, { type: "FILL_FORM_FIELD", uid: field.uid, value: answer });
     if (!fillResponse?.ok) {
-      await safeRuntimeMessage({ type: "AUTOFILL_PROGRESS", message: `[${i + 1}/${fields.length}] Could not fill: ${label} (${fillResponse?.error || "unknown error"})` });
+      await safeRuntimeMessage({
+        type: "AUTOFILL_PROGRESS",
+        message: t(
+          "progressCouldNotFill",
+          [String(i + 1), String(fields.length), label, fillResponse?.error || t("unknownError", undefined, "unknown error")],
+          `[${i + 1}/${fields.length}] Could not fill: ${label} (${fillResponse?.error || "unknown error"})`
+        )
+      });
       skipped += 1;
       continue;
     }
 
     filled += 1;
-    await safeRuntimeMessage({ type: "AUTOFILL_PROGRESS", message: `[${i + 1}/${fields.length}] Filled: ${label}` });
+    await safeRuntimeMessage({
+      type: "AUTOFILL_PROGRESS",
+      message: t("progressFilled", [String(i + 1), String(fields.length), label], `[${i + 1}/${fields.length}] Filled: ${label}`)
+    });
   }
 
-  await safeRuntimeMessage({ type: "AUTOFILL_STATUS", message: `Completed. Filled ${filled}, skipped ${skipped}.`, error: false });
+  await safeRuntimeMessage({
+    type: "AUTOFILL_STATUS",
+    message: t("statusCompletedFilledSkipped", [String(filled), String(skipped)], `Completed. Filled ${filled}, skipped ${skipped}.`),
+    error: false
+  });
 }
 
 async function processSingleField(field) {
@@ -529,13 +574,13 @@ async function processSingleField(field) {
   const model = settings.model?.trim() || "gpt-4.1-mini";
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!vectorStoreId) {
-    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+    throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
   if (!field || typeof field !== "object") {
-    throw new Error("Invalid field payload.");
+    throw new Error(t("errInvalidFieldPayload", undefined, "Invalid field payload."));
   }
 
   const answer = await queryFieldAnswer({ apiKey, vectorStoreId, model, field });
@@ -552,10 +597,10 @@ async function processVectorFilesList() {
   const vectorStoreId = settings.vectorStoreId?.trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!vectorStoreId) {
-    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+    throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
 
   const files = await listVectorStoreFiles({ apiKey, vectorStoreId });
@@ -568,10 +613,10 @@ async function processVectorFileAdd(file) {
   const vectorStoreId = settings.vectorStoreId?.trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!vectorStoreId) {
-    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+    throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
 
   const uploaded = await uploadFileToOpenAI({ apiKey, file });
@@ -585,13 +630,13 @@ async function processVectorFileDelete(fileId) {
   const vectorStoreId = settings.vectorStoreId?.trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!vectorStoreId) {
-    throw new Error("Vector Store ID is missing. Add it in the extension popup.");
+    throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
   if (!fileId) {
-    throw new Error("Missing file id.");
+    throw new Error(t("errMissingFileId", undefined, "Missing file id."));
   }
 
   await detachFileFromVectorStore({ apiKey, vectorStoreId, fileId });
@@ -616,7 +661,7 @@ async function processVectorStoresList(apiKeyOverride) {
   const apiKey = String(apiKeyOverride || "").trim() || settings.apiKey?.trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
 
   const stores = await listVectorStores({ apiKey });
@@ -637,7 +682,7 @@ async function processVectorStoreCreate(name) {
 
   const trimmedName = String(name || "").trim();
   if (!trimmedName) {
-    throw new Error("Name is required.");
+    throw new Error(t("errNameRequired", undefined, "Name is required."));
   }
 
   const created = await createVectorStore({ apiKey, name: trimmedName });
@@ -654,10 +699,10 @@ async function processVectorStoreDeletePreview(vectorStoreId) {
   const selectedVectorStoreId = (vectorStoreId || settings.vectorStoreId || "").trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!selectedVectorStoreId) {
-    throw new Error("No file database selected.");
+    throw new Error(t("errNoFileDatabaseSelected", undefined, "No file database selected."));
   }
 
   const files = await listAllVectorStoreFilesRaw({ apiKey, vectorStoreId: selectedVectorStoreId });
@@ -685,10 +730,10 @@ async function processVectorStoreDelete(vectorStoreId) {
   const selectedVectorStoreId = (vectorStoreId || settings.vectorStoreId || "").trim();
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing. Add it in the extension popup.");
+    throw new Error(t("errApiKeyMissingPopup", undefined, "OpenAI API key is missing. Add it in the extension popup."));
   }
   if (!selectedVectorStoreId) {
-    throw new Error("No file database selected.");
+    throw new Error(t("errNoFileDatabaseSelected", undefined, "No file database selected."));
   }
 
   const files = await listAllVectorStoreFilesRaw({ apiKey, vectorStoreId: selectedVectorStoreId });
@@ -726,7 +771,7 @@ async function processValidateApiKey(apiKeyOverride) {
   }
 
   if (!apiKey) {
-    throw new Error("OpenAI API key is missing.");
+    throw new Error(t("errApiKeyMissing", undefined, "OpenAI API key is missing."));
   }
 
   const response = await fetch("https://api.openai.com/v1/vector_stores?limit=1", {
@@ -739,7 +784,7 @@ async function processValidateApiKey(apiKeyOverride) {
   }
 
   if (response.status === 401 || response.status === 403) {
-    throw new Error("Invalid OpenAI API key.");
+    throw new Error(t("errInvalidApiKey", undefined, "Invalid OpenAI API key."));
   }
 
   const details = await parseErrorDetails(response);
@@ -747,6 +792,8 @@ async function processValidateApiKey(apiKeyOverride) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const sender = _sender;
+
   if (!message || typeof message !== "object") {
     return;
   }
@@ -755,14 +802,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const tabId = message.tabId;
 
     if (!Number.isInteger(tabId)) {
-      sendResponse({ ok: false, error: "Invalid tab identifier." });
+      sendResponse({ ok: false, error: t("errInvalidTabId", undefined, "Invalid tab identifier.") });
       return;
     }
 
     processAutofill(tabId)
       .then(() => {})
       .catch(async (error) => {
-        await safeRuntimeMessage({ type: "AUTOFILL_STATUS", message: error.message || "Autofill failed.", error: true });
+        await safeRuntimeMessage({
+          type: "AUTOFILL_STATUS",
+          message: error.message || t("errAutofillFailed", undefined, "Autofill failed."),
+          error: true
+        });
       });
 
     sendResponse({ ok: true });
@@ -772,70 +823,70 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "FILL_SINGLE_FIELD") {
     processSingleField(message.field)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not fill field." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotFillField", undefined, "Could not fill field.") }));
     return true;
   }
 
   if (message.type === "VECTOR_FILES_LIST") {
     processVectorFilesList()
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not list files." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotListFiles", undefined, "Could not list files.") }));
     return true;
   }
 
   if (message.type === "VECTOR_FILES_ADD") {
     processVectorFileAdd(message.file)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not add file." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotAddFile", undefined, "Could not add file.") }));
     return true;
   }
 
   if (message.type === "VECTOR_FILES_DELETE") {
     processVectorFileDelete(message.fileId)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not delete file." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotDeleteFile", undefined, "Could not delete file.") }));
     return true;
   }
 
   if (message.type === "VECTOR_FILES_UPDATE") {
     processVectorFileUpdate(message.fileId, message.file)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not update file." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotUpdateFile", undefined, "Could not update file.") }));
     return true;
   }
 
   if (message.type === "VECTOR_STORES_LIST") {
     processVectorStoresList(message.apiKey)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not list vector stores." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotListVectorStores", undefined, "Could not list vector stores.") }));
     return true;
   }
 
   if (message.type === "VECTOR_STORES_CREATE") {
     processVectorStoreCreate(message.name)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not create vector store." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotCreateVectorStore", undefined, "Could not create vector store.") }));
     return true;
   }
 
   if (message.type === "VECTOR_STORE_DELETE_PREVIEW") {
     processVectorStoreDeletePreview(message.vectorStoreId)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not prepare deletion preview." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotPrepareDeletionPreview", undefined, "Could not prepare deletion preview.") }));
     return true;
   }
 
   if (message.type === "VECTOR_STORE_DELETE") {
     processVectorStoreDelete(message.vectorStoreId)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Could not delete file database." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotDeleteFileDatabase", undefined, "Could not delete file database.") }));
     return true;
   }
 
   if (message.type === "VALIDATE_API_KEY") {
     processValidateApiKey(message.apiKey)
       .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Invalid OpenAI API key." }));
+      .catch((error) => sendResponse({ ok: false, error: error.message || t("errInvalidApiKey", undefined, "Invalid OpenAI API key.") }));
     return true;
   }
 

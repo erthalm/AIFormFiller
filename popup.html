@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI Form Filler</title>
+  <title data-i18n="popupTitle">AI Form Filler</title>
   <style>
     :root {
       color-scheme: light;
@@ -338,82 +338,82 @@
   <div id="actionsView" class="view active">
     <div class="card">
       <div class="title-row">
-        <h1>AI Form Filler</h1>
-        <span class="badge">Ready</span>
+        <h1 data-i18n="popupTitle">AI Form Filler</h1>
+        <span class="badge" data-i18n="badgeReady">Ready</span>
       </div>
       <div id="configSummary"></div>
-      <label for="vectorStoreId" class="mt-8">File Database</label>
+      <label for="vectorStoreId" class="mt-8" data-i18n="labelFileDatabase">File Database</label>
       <div class="actions mt-0">
         <select id="vectorStoreId" class="mb-0 flex-1"></select>
-        <button class="secondary" id="refreshStoresBtn" type="button">Refresh</button>
+        <button class="secondary" id="refreshStoresBtn" type="button" data-i18n="btnRefresh">Refresh</button>
       </div>
       <div class="stack">
-        <button class="primary" id="fillBtn" type="button">Fill Current Form</button>
-        <button class="secondary" id="openFilesBtn" type="button">Files</button>
-        <button class="secondary" id="openSettingsBtn" type="button">Configuration</button>
+        <button class="primary" id="fillBtn" type="button" data-i18n="btnFillCurrentForm">Fill Current Form</button>
+        <button class="secondary" id="openFilesBtn" type="button" data-i18n="btnFiles">Files</button>
+        <button class="secondary" id="openSettingsBtn" type="button" data-i18n="btnConfiguration">Configuration</button>
       </div>
       <div id="status"></div>
     </div>
 
     <div class="card">
-      <strong>Field Progress</strong>
+      <strong data-i18n="titleFieldProgress">Field Progress</strong>
       <ul id="log"></ul>
-      <div class="hint">Each field is searched against your OpenAI File Search documents and filled sequentially.</div>
+      <div class="hint" data-i18n="hintFieldProgress">Each field is searched against your OpenAI File Search documents and filled sequentially.</div>
     </div>
   </div>
 
   <div id="settingsView" class="view">
     <div class="card">
-      <h1>Configuration</h1>
+      <h1 data-i18n="titleConfiguration">Configuration</h1>
 
-      <label for="apiKey">OpenAI API Key</label>
-      <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+      <label for="apiKey" data-i18n="labelApiKey">OpenAI API Key</label>
+      <input id="apiKey" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" autocomplete="off" />
 
       <div class="section">
-        <div class="section-title">Create Database</div>
+        <div class="section-title" data-i18n="sectionCreateDatabase">Create Database</div>
         <div class="actions mt-0">
-          <input id="newStoreName" type="text" placeholder="New file database name" class="mb-0 flex-1" />
-          <button class="secondary" id="createStoreBtn" type="button">Create</button>
+          <input id="newStoreName" type="text" placeholder="New file database name" data-i18n-placeholder="placeholderNewDatabaseName" class="mb-0 flex-1" />
+          <button class="secondary" id="createStoreBtn" type="button" data-i18n="btnCreate">Create</button>
         </div>
       </div>
 
       <div class="section">
-        <div class="section-title">Delete Database</div>
-        <div class="small mt-0">Target: <strong id="selectedStoreForDelete">None</strong></div>
-        <div class="small">This removes the database and every file in it.</div>
+        <div class="section-title" data-i18n="sectionDeleteDatabase">Delete Database</div>
+        <div class="small mt-0"><span data-i18n="labelTarget">Target</span>: <strong id="selectedStoreForDelete">None</strong></div>
+        <div class="small" data-i18n="hintDeleteDatabase">This removes the database and every file in it.</div>
         <div class="actions mt-8">
-          <button class="danger" id="deleteStoreBtn" type="button">Delete Database</button>
+          <button class="danger" id="deleteStoreBtn" type="button" data-i18n="btnDeleteDatabase">Delete Database</button>
         </div>
       </div>
 
-      <label for="model">Model</label>
+      <label for="model" data-i18n="labelModel">Model</label>
       <select id="model">
-        <option value="gpt-4.1-mini">gpt-4.1-mini (Recommended)</option>
+        <option value="gpt-4.1-mini" data-i18n="modelRecommended">gpt-4.1-mini (Recommended)</option>
         <option value="gpt-4.1">gpt-4.1</option>
         <option value="gpt-4o-mini">gpt-4o-mini</option>
         <option value="gpt-4o">gpt-4o</option>
       </select>
 
       <div class="actions">
-        <button class="secondary" id="backBtn" type="button">Back</button>
-        <button class="primary" id="saveBtn" type="button">Save</button>
+        <button class="secondary" id="backBtn" type="button" data-i18n="btnBack">Back</button>
+        <button class="primary" id="saveBtn" type="button" data-i18n="btnSave">Save</button>
       </div>
 
-      <div class="small">Stored locally with Chrome extension storage.</div>
+      <div class="small" data-i18n="hintStoredLocally">Stored locally with Chrome extension storage.</div>
     </div>
   </div>
 
   <div id="filesView" class="view">
     <div class="card">
-      <h1>Files</h1>
+      <h1 data-i18n="titleFiles">Files</h1>
 
-      <label for="newFileInput">Add File</label>
+      <label for="newFileInput" data-i18n="labelAddFile">Add File</label>
       <input id="newFileInput" type="file" />
 
       <div class="actions">
-        <button class="secondary" id="filesBackBtn" type="button">Back</button>
-        <button class="secondary" id="refreshFilesBtn" type="button">Refresh</button>
-        <button class="primary" id="uploadFileBtn" type="button">Upload</button>
+        <button class="secondary" id="filesBackBtn" type="button" data-i18n="btnBack">Back</button>
+        <button class="secondary" id="refreshFilesBtn" type="button" data-i18n="btnRefresh">Refresh</button>
+        <button class="primary" id="uploadFileBtn" type="button" data-i18n="btnUpload">Upload</button>
       </div>
 
       <div id="filesStatus" class="small"></div>
@@ -421,9 +421,9 @@
     </div>
 
     <div class="card">
-      <strong>Current Files</strong>
+      <strong data-i18n="titleCurrentFiles">Current Files</strong>
       <ul id="filesList" class="file-list"></ul>
-      <div class="hint">Update = replace file with a new version.</div>
+      <div class="hint" data-i18n="hintUpdateFile">Update = replace file with a new version.</div>
     </div>
   </div>
 

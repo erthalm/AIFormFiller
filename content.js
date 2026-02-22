@@ -10,6 +10,14 @@ let availabilityTimer = null;
 let availabilityObserver = null;
 let lastKnownHasForm = null;
 
+function t(key, substitutions, fallback) {
+  const message = chrome.i18n.getMessage(key, substitutions);
+  if (message) {
+    return message;
+  }
+  return fallback || key;
+}
+
 function isVisible(el) {
   const style = window.getComputedStyle(el);
   const rect = el.getBoundingClientRect();
@@ -338,7 +346,7 @@ function ensureHoverControls() {
 
   hoverButton = document.createElement("button");
   hoverButton.type = "button";
-  hoverButton.textContent = "Fill with AI";
+  hoverButton.textContent = t("contentFillWithAi", undefined, "Fill with AI");
   hoverButton.style.position = "fixed";
   hoverButton.style.zIndex = "2147483647";
   hoverButton.style.display = "none";
@@ -379,7 +387,7 @@ function ensureHoverControls() {
     event.stopPropagation();
 
     if (!activeHoverField || shouldSkipInput(activeHoverField)) {
-      showFieldStatus("Field unavailable", true);
+      showFieldStatus(t("contentFieldUnavailable", undefined, "Field unavailable"), true);
       hideHoverButton();
       return;
     }
@@ -387,8 +395,8 @@ function ensureHoverControls() {
     const descriptor = getFieldDescriptor(activeHoverField);
 
     hoverButton.disabled = true;
-    hoverButton.textContent = "Filling...";
-    showFieldStatus("Searching docs...", false);
+    hoverButton.textContent = t("contentFilling", undefined, "Filling...");
+    showFieldStatus(t("contentSearchingDocs", undefined, "Searching docs..."), false);
 
     try {
       const response = await runtimeSendMessage({
@@ -397,25 +405,25 @@ function ensureHoverControls() {
       });
 
       if (!response || !response.ok) {
-        throw new Error((response && response.error) || "Could not fetch value for this field.");
+        throw new Error((response && response.error) || t("contentCouldNotFetchFieldValue", undefined, "Could not fetch value for this field."));
       }
 
       if (!response.found || !response.value) {
-        showFieldStatus("No answer found", true);
+        showFieldStatus(t("contentNoAnswerFound", undefined, "No answer found"), true);
         return;
       }
 
       const fillResult = fillField(descriptor.uid, response.value);
       if (!fillResult.ok) {
-        throw new Error(fillResult.error || "Unable to apply answer to field.");
+        throw new Error(fillResult.error || t("contentUnableApplyAnswer", undefined, "Unable to apply answer to field."));
       }
 
-      showFieldStatus("Field filled", false);
+      showFieldStatus(t("contentFieldFilled", undefined, "Field filled"), false);
     } catch (error) {
-      showFieldStatus((error && error.message) || "Fill failed", true);
+      showFieldStatus((error && error.message) || t("contentFillFailed", undefined, "Fill failed"), true);
     } finally {
       hoverButton.disabled = false;
-      hoverButton.textContent = "Fill with AI";
+      hoverButton.textContent = t("contentFillWithAi", undefined, "Fill with AI");
     }
   });
 }
