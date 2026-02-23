@@ -90,7 +90,7 @@
   "errCouldNotSaveFileDatabaseSelection": { "message": "No se pudo guardar la seleccion de base de archivos." },
   "errCouldNotSaveSettings": { "message": "No se pudieron guardar las configuraciones." },
   "errFailedLoadSettings": { "message": "No se pudieron cargar las configuraciones." },
-  "contentFillWithAi": { "message": "Completar con IA" },
+  "contentFillWithAi": { "message": "AI Fill Form" },
   "contentFieldUnavailable": { "message": "Campo no disponible" },
   "contentFilling": { "message": "Completando..." },
   "contentSearchingDocs": { "message": "Buscando en documentos..." },

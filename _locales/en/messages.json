@@ -90,7 +90,7 @@
   "errCouldNotSaveFileDatabaseSelection": { "message": "Could not save file database selection." },
   "errCouldNotSaveSettings": { "message": "Could not save settings." },
   "errFailedLoadSettings": { "message": "Failed to load settings." },
-  "contentFillWithAi": { "message": "Fill with AI" },
+  "contentFillWithAi": { "message": "AI Fill Form" },
   "contentFieldUnavailable": { "message": "Field unavailable" },
   "contentFilling": { "message": "Filling..." },
   "contentSearchingDocs": { "message": "Searching docs..." },

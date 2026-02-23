@@ -25,16 +25,24 @@
       box-sizing: border-box;
     }
 
+    html,
+    body {
+      overflow: hidden;
+    }
+
+    html {
+      width: 420px;
+    }
+
     body {
       margin: 0;
       font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
       background: linear-gradient(170deg, var(--bg-top), var(--bg-bottom));
       color: var(--text);
-      width: min(420px, 100vw);
+      width: 100%;
       min-height: 460px;
       padding: 16px;
       position: relative;
-      overflow: hidden;
     }
 
     body::before {
