@@ -1,5 +1,8 @@
-﻿const SETTINGS_KEY = "aiFormFillerSettings";
+importScripts("shared-utils.js", "lib/field-safety.js");
+
+const SETTINGS_KEY = "aiFormFillerSettings";
 const CRYPTO_KEY_KEY = "aiFormFillerCryptoKey";
+const SESSION_SETTINGS_KEY = "aiFormFillerSessionSettings";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_FILES_URL = "https://api.openai.com/v1/files";
 const ACTION_ICON = {
@@ -9,92 +12,21 @@ const ACTION_ICON = {
   128: "icon128x128_green.png"
 };
 const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
-let languageMessages = {};
+const { storageGet, runtimeSendMessage, base64ToBytes, createTranslator } = self.AFFShared;
+const { isSensitiveFieldDescriptor } = self.AFFFieldSafety;
+const AUTOFILL_BATCH_SIZE = 4;
+const AUTOFILL_MAX_CONCURRENCY = 2;
+const AUTOFILL_RETRIES = 3;
 
-function applySubstitutions(template, substitutions) {
-  const values = Array.isArray(substitutions)
-    ? substitutions.map((value) => String(value))
-    : substitutions == null
-      ? []
-      : [String(substitutions)];
+const i18n = createTranslator({
+  supportedLanguages: SUPPORTED_LANGUAGE_OVERRIDES,
+  settingsKey: SETTINGS_KEY
+});
 
-  let result = String(template || "");
-  values.forEach((value, idx) => {
-    result = result.split(`$${idx + 1}`).join(value);
-  });
-  return result;
-}
-
-function getOverrideMessage(key, substitutions) {
-  const entry = languageMessages && languageMessages[key];
-  const message = entry && entry.message;
-  if (!message) {
-    return "";
-  }
-  return applySubstitutions(message, substitutions);
-}
-
-async function loadLanguageMessages(language) {
-  const safeLanguage = SUPPORTED_LANGUAGE_OVERRIDES.has(language) ? language : "default";
-  if (safeLanguage === "default") {
-    languageMessages = {};
-    return;
-  }
-
-  try {
-    const url = chrome.runtime.getURL(`_locales/${safeLanguage}/messages.json`);
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Could not load locale file for ${safeLanguage}`);
-    }
-    languageMessages = await response.json();
-  } catch (_error) {
-    languageMessages = {};
-  }
-}
-
-async function initializeLanguageOverride() {
-  try {
-    const data = await storageGet([SETTINGS_KEY]);
-    const settings = data[SETTINGS_KEY] || {};
-    const preferred = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
-    await loadLanguageMessages(preferred);
-  } catch (_error) {
-    languageMessages = {};
-  }
-}
-
-function t(key, substitutions, fallback) {
-  const override = getOverrideMessage(key, substitutions);
-  if (override) {
-    return override;
-  }
-
-  const message = chrome.i18n.getMessage(key, substitutions);
-  if (message) {
-    return message;
-  }
-  return fallback || key;
-}
-
-function storageGet(keys) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result || {});
-    });
-  });
-}
+const t = i18n.t;
 
 function safeRuntimeMessage(message) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(message, () => {
-      resolve();
-    });
-  });
+  return runtimeSendMessage(message).catch(() => undefined);
 }
 
 function actionSetIcon(details) {
@@ -113,14 +45,45 @@ function actionSetTitle(details) {
   });
 }
 
+async function ensureContentScriptInjected(tabId) {
+  if (!Number.isInteger(tabId)) {
+    return false;
+  }
+
+  try {
+    const markerResult = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => Boolean(globalThis.__aiFormFillerContentLoaded)
+    });
+    const alreadyInjected = Boolean(markerResult && markerResult[0] && markerResult[0].result);
+    if (alreadyInjected) {
+      return true;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ["shared-utils.js", "lib/field-safety.js", "content.js"]
+    });
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function tabMessage(tabId, message) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(response);
+  return ensureContentScriptInjected(tabId).then((injected) => {
+    if (!injected) {
+      throw new Error(t("errCouldNotInjectPageScript", undefined, "Could not run on this page. Open a regular web page and try again."));
+    }
+
+    return new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
     });
   });
 }
@@ -164,15 +127,6 @@ async function updateActionStateForTabKnownValue(tabId, hasForm) {
   });
 }
 
-function base64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 async function importAesKeyFromRaw(rawBase64) {
   const keyBytes = base64ToBytes(rawBase64);
   return crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["decrypt"]);
@@ -198,18 +152,28 @@ async function decryptApiKey(encryptedPayload) {
 }
 
 async function getSettings() {
-  const data = await storageGet([SETTINGS_KEY]);
-  const settings = data[SETTINGS_KEY] || {};
+  const [localData, sessionData] = await Promise.all([
+    storageGet([SETTINGS_KEY], "local"),
+    storageGet([SESSION_SETTINGS_KEY], "session")
+  ]);
+  const settings = localData[SETTINGS_KEY] || {};
+  const sessionSettings = sessionData[SESSION_SETTINGS_KEY] || {};
+  const storageMode = settings.apiKeyStorageMode === "session" ? "session" : "persistent";
 
   let apiKey = "";
-  if (settings.apiKeyEncrypted) {
+  if (storageMode === "session") {
+    apiKey = String(sessionSettings.apiKey || "").trim();
+  }
+
+  if (!apiKey && settings.apiKeyEncrypted) {
     apiKey = await decryptApiKey(settings.apiKeyEncrypted);
-  } else if (settings.apiKey) {
+  } else if (!apiKey && settings.apiKey) {
     apiKey = settings.apiKey.trim();
   }
 
   return {
     apiKey,
+    apiKeyStorageMode: storageMode,
     vectorStoreId: settings.vectorStoreId || "",
     model: settings.model || "gpt-4.1-mini"
   };
@@ -289,11 +253,110 @@ function buildOpenAIHeaders(apiKey, useJson, useAssistantsBeta) {
   return headers;
 }
 
-async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
+function createHttpError(status, details) {
+  const error = new Error(`${classifyHttpError(status)}${details ? ` ${details}` : ""}`);
+  error.status = status;
+  return error;
+}
+
+function extractJsonObject(text) {
+  const input = String(text || "").trim();
+  if (!input) {
+    return null;
+  }
+
+  const fenced = input.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : input;
+
+  try {
+    return JSON.parse(candidate);
+  } catch (_error) {
+    const firstBrace = candidate.indexOf("{");
+    const lastBrace = candidate.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+      } catch (_ignored) {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function shouldRetry(error) {
+  const status = Number(error && error.status);
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry(work, attempts = AUTOFILL_RETRIES) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !shouldRetry(error)) {
+        throw error;
+      }
+      const delay = Math.min(5000, 400 * (2 ** (attempt - 1))) + Math.floor(Math.random() * 120);
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+function chunkArray(values, size) {
+  const chunks = [];
+  for (let i = 0; i < values.length; i += size) {
+    chunks.push(values.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  const queue = items.slice();
+  const workers = [];
+
+  for (let i = 0; i < Math.min(limit, items.length); i += 1) {
+    workers.push((async () => {
+      while (queue.length) {
+        const next = queue.shift();
+        if (!next) {
+          break;
+        }
+        await worker(next);
+      }
+    })());
+  }
+
+  await Promise.all(workers);
+}
+
+function fieldFingerprint(field) {
+  return JSON.stringify({
+    label: String(field.label || "").trim().toLowerCase(),
+    name: String(field.name || "").trim().toLowerCase(),
+    id: String(field.id || "").trim().toLowerCase(),
+    placeholder: String(field.placeholder || "").trim().toLowerCase(),
+    type: String(field.type || "").trim().toLowerCase(),
+    tag: String(field.tag || "").trim().toLowerCase(),
+    options: Array.isArray(field.options)
+      ? field.options.map((option) => String(option || "").trim().toLowerCase()).slice(0, 50)
+      : []
+  });
+}
+
+async function queryFieldBatchAnswers({ apiKey, vectorStoreId, model, fields }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 35000);
 
-  const fieldContext = {
+  const fieldContext = fields.map((field) => ({
+    uid: field.uid,
     label: field.label,
     name: field.name,
     id: field.id,
@@ -302,7 +365,7 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
     tag: field.tag,
     required: field.required,
     options: field.options || []
-  };
+  }));
 
   const body = {
     model,
@@ -319,7 +382,7 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
         content: [
           {
             type: "input_text",
-            text: "You fill web form fields from retrieved documents. Return only the best value for the target field, with no explanation. If not found, return NOT_FOUND."
+            text: "You fill web form fields from retrieved documents. Return strict JSON only. Keys must be the uid values provided. Value must be best match, or NOT_FOUND."
           }
         ]
       },
@@ -328,7 +391,7 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
         content: [
           {
             type: "input_text",
-            text: `Target form field metadata: ${JSON.stringify(fieldContext)}\nRespond with only the value for this field. For select fields, return one option from the provided options.`
+            text: `Return a JSON object only for these fields: ${JSON.stringify(fieldContext)}. For select fields, return one option from options.`
           }
         ]
       }
@@ -348,14 +411,26 @@ async function queryFieldAnswer({ apiKey, vectorStoreId, model, field }) {
 
     if (!response.ok) {
       const details = await parseErrorDetails(response);
-      throw new Error(`${classifyHttpError(response.status)}${details ? ` ${details}` : ""}`);
+      throw createHttpError(response.status, details);
     }
 
     const json = await response.json();
-    return cleanModelAnswer(parseOutputText(json));
+    const parsed = extractJsonObject(parseOutputText(json));
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error(t("errInvalidModelOutput", undefined, "Model response format was invalid."));
+    }
+
+    const answersByUid = {};
+    fields.forEach((field) => {
+      const raw = parsed[field.uid];
+      answersByUid[field.uid] = cleanModelAnswer(typeof raw === "string" ? raw : "");
+    });
+    return answersByUid;
   } catch (error) {
     if (error?.name === "AbortError") {
-      throw new Error(t("errOpenAiTimeout", undefined, "OpenAI request timed out."));
+      const timeoutError = new Error(t("errOpenAiTimeout", undefined, "OpenAI request timed out."));
+      timeoutError.status = 408;
+      throw timeoutError;
     }
     throw error;
   } finally {
@@ -541,7 +616,7 @@ async function processAutofill(tabId) {
     throw new Error(t("errVectorStoreMissingPopup", undefined, "Vector Store ID is missing. Add it in the extension popup."));
   }
 
-  const fieldsResponse = await tabMessage(tabId, { type: "GET_FORM_FIELDS" });
+  const fieldsResponse = await tabMessage(tabId, { type: "GET_FORM_FIELDS", includeSensitive: false });
   if (!fieldsResponse?.ok) {
     throw new Error(fieldsResponse?.error || "Unable to read form fields from page.");
   }
@@ -562,34 +637,60 @@ async function processAutofill(tabId) {
     error: false
   });
 
+  const byFingerprint = new Map();
+  fields.forEach((field) => {
+    const key = fieldFingerprint(field);
+    if (!byFingerprint.has(key)) {
+      byFingerprint.set(key, field);
+    }
+  });
+
+  const uniqueFields = Array.from(byFingerprint.values());
+  const batches = chunkArray(uniqueFields, AUTOFILL_BATCH_SIZE);
+  const answerByFingerprint = new Map();
+  const errorByFingerprint = new Map();
+
+  await runWithConcurrency(batches, AUTOFILL_MAX_CONCURRENCY, async (batch) => {
+    try {
+      const answersByUid = await withRetry(
+        () => queryFieldBatchAnswers({ apiKey, vectorStoreId, model, fields: batch }),
+        AUTOFILL_RETRIES
+      );
+
+      batch.forEach((field) => {
+        const key = fieldFingerprint(field);
+        answerByFingerprint.set(key, answersByUid[field.uid] || "");
+      });
+    } catch (error) {
+      batch.forEach((field) => {
+        const key = fieldFingerprint(field);
+        errorByFingerprint.set(key, error.message || t("requestFailed", undefined, "request failed"));
+      });
+    }
+  });
+
   let filled = 0;
   let skipped = 0;
 
   for (let i = 0; i < fields.length; i += 1) {
     const field = fields[i];
     const label = fieldDisplayName(field);
+    const key = fieldFingerprint(field);
 
-    await safeRuntimeMessage({
-      type: "AUTOFILL_PROGRESS",
-      message: t("progressSearching", [String(i + 1), String(fields.length), label], `[${i + 1}/${fields.length}] Searching: ${label}`)
-    });
-
-    let answer;
-    try {
-      answer = await queryFieldAnswer({ apiKey, vectorStoreId, model, field });
-    } catch (error) {
+    if (errorByFingerprint.has(key)) {
       await safeRuntimeMessage({
         type: "AUTOFILL_PROGRESS",
         message: t(
           "progressError",
-          [String(i + 1), String(fields.length), label, error.message || t("requestFailed", undefined, "request failed")],
-          `[${i + 1}/${fields.length}] Error: ${label} -> ${error.message || "request failed"}`
+          [String(i + 1), String(fields.length), label, errorByFingerprint.get(key)],
+          `[${i + 1}/${fields.length}] Error: ${label} -> ${errorByFingerprint.get(key)}`
         )
       });
       skipped += 1;
       continue;
     }
 
+    const answer = answerByFingerprint.get(key) || "";
     if (!answer) {
       await safeRuntimeMessage({
         type: "AUTOFILL_PROGRESS",
@@ -599,7 +700,7 @@ async function processAutofill(tabId) {
       continue;
     }
 
-    const fillResponse = await tabMessage(tabId, { type: "FILL_FORM_FIELD", uid: field.uid, value: answer });
+    const fillResponse = await tabMessage(tabId, { type: "FILL_FORM_FIELD", uid: field.uid, value: answer, allowSensitive: false });
     if (!fillResponse?.ok) {
       await safeRuntimeMessage({
         type: "AUTOFILL_PROGRESS",
@@ -627,7 +728,7 @@ async function processAutofill(tabId) {
   });
 }
 
-async function processSingleField(field) {
+async function processSingleField(field, allowSensitive) {
   const settings = await getSettings();
   const apiKey = settings.apiKey?.trim();
   const vectorStoreId = settings.vectorStoreId?.trim();
@@ -643,7 +744,16 @@ async function processSingleField(field) {
     throw new Error(t("errInvalidFieldPayload", undefined, "Invalid field payload."));
   }
 
-  const answer = await queryFieldAnswer({ apiKey, vectorStoreId, model, field });
+  const sensitivity = isSensitiveFieldDescriptor(field);
+  if (sensitivity.sensitive && !allowSensitive) {
+    throw new Error(t("errSensitiveFieldRequiresConfirmation", undefined, "Sensitive field requires explicit confirmation."));
+  }
+
+  const answerByUid = await withRetry(
+    () => queryFieldBatchAnswers({ apiKey, vectorStoreId, model, fields: [field] }),
+    AUTOFILL_RETRIES
+  );
+  const answer = answerByUid[field.uid] || "";
   if (!answer) {
     return { ok: true, found: false };
   }
@@ -881,7 +991,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "FILL_SINGLE_FIELD") {
-    processSingleField(message.field)
+    processSingleField(message.field, Boolean(message.allowSensitive))
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error.message || t("errCouldNotFillField", undefined, "Could not fill field.") }));
     return true;
@@ -969,25 +1079,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  updateActionStateForTab(activeInfo.tabId).catch(() => {
-    // ignore
-  });
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "complete") {
-    updateActionStateForTab(tabId).catch(() => {
-      // ignore
-    });
-    setTimeout(() => {
-      updateActionStateForTab(tabId).catch(() => {
-        // ignore
-      });
-    }, 500);
-  }
-});
-
 function initializeActionIcons() {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (chrome.runtime.lastError) {
@@ -1003,14 +1094,14 @@ function initializeActionIcons() {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  initializeLanguageOverride().catch(() => {
+  i18n.initializeLanguageOverride().catch(() => {
     // ignore
   });
   initializeActionIcons();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  initializeLanguageOverride().catch(() => {
+  i18n.initializeLanguageOverride().catch(() => {
     // ignore
   });
   initializeActionIcons();
@@ -1020,11 +1111,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes || !changes[SETTINGS_KEY]) {
     return;
   }
-  initializeLanguageOverride().catch(() => {
+  i18n.initializeLanguageOverride().catch(() => {
     // ignore
   });
 });
 
-initializeLanguageOverride().catch(() => {
+i18n.initializeLanguageOverride().catch(() => {
   // ignore
 });
+

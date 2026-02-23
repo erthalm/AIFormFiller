@@ -1,5 +1,24 @@
-﻿const SETTINGS_KEY = "aiFormFillerSettings";
+const SETTINGS_KEY = "aiFormFillerSettings";
 const CRYPTO_KEY_KEY = "aiFormFillerCryptoKey";
+const SESSION_SETTINGS_KEY = "aiFormFillerSessionSettings";
+const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
+
+const {
+  storageGet,
+  storageSet,
+  storageRemove,
+  runtimeSendMessage,
+  queryTabs,
+  bytesToBase64,
+  base64ToBytes,
+  createTranslator
+} = self.AFFShared;
+
+const i18n = createTranslator({
+  supportedLanguages: SUPPORTED_LANGUAGE_OVERRIDES,
+  settingsKey: SETTINGS_KEY
+});
+const t = i18n.t;
 
 const ui = {
   actionsView: document.getElementById("actionsView"),
@@ -17,6 +36,7 @@ const ui = {
   selectedStoreForDelete: document.getElementById("selectedStoreForDelete"),
   model: document.getElementById("model"),
   language: document.getElementById("language"),
+  apiKeyStorageMode: document.getElementById("apiKeyStorageMode"),
 
   saveBtn: document.getElementById("saveBtn"),
   backBtn: document.getElementById("backBtn"),
@@ -39,73 +59,6 @@ const ui = {
 let pendingReplaceFileId = null;
 let cachedVectorStores = [];
 let hasFillableFormOnPage = false;
-const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
-let languageOverride = "default";
-let languageMessages = {};
-
-function applySubstitutions(template, substitutions) {
-  const values = Array.isArray(substitutions)
-    ? substitutions.map((value) => String(value))
-    : substitutions == null
-      ? []
-      : [String(substitutions)];
-
-  let result = String(template || "");
-  values.forEach((value, idx) => {
-    result = result.split(`$${idx + 1}`).join(value);
-  });
-  return result;
-}
-
-function getOverrideMessage(key, substitutions) {
-  const entry = languageMessages && languageMessages[key];
-  const message = entry && entry.message;
-  if (!message) {
-    return "";
-  }
-  return applySubstitutions(message, substitutions);
-}
-
-async function loadLanguageMessages(language) {
-  const safeLanguage = SUPPORTED_LANGUAGE_OVERRIDES.has(language) ? language : "default";
-  if (safeLanguage === "default") {
-    languageOverride = "default";
-    languageMessages = {};
-    return;
-  }
-
-  try {
-    const url = chrome.runtime.getURL(`_locales/${safeLanguage}/messages.json`);
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Could not load locale file for ${safeLanguage}`);
-    }
-    languageMessages = await response.json();
-    languageOverride = safeLanguage;
-  } catch (_error) {
-    languageOverride = "default";
-    languageMessages = {};
-  }
-}
-
-async function initializeLanguageOverride() {
-  const settings = await getSettings();
-  const preferred = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
-  await loadLanguageMessages(preferred);
-}
-
-function t(key, substitutions, fallback) {
-  const override = getOverrideMessage(key, substitutions);
-  if (override) {
-    return override;
-  }
-
-  const message = chrome.i18n.getMessage(key, substitutions);
-  if (message) {
-    return message;
-  }
-  return fallback || key;
-}
 
 function applyI18nToDom() {
   document.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -133,41 +86,6 @@ function applyI18nToDom() {
   document.title = t("popupTitle", undefined, document.title);
 }
 
-function storageGet(keys) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result || {});
-    });
-  });
-}
-
-function storageSet(items) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set(items, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-function queryTabs(queryInfo) {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.query(queryInfo, (tabs) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(tabs || []);
-    });
-  });
-}
 
 function setStatus(message, isError) {
   ui.status.textContent = message;
@@ -196,30 +114,14 @@ function switchView(view) {
   ui.filesView.classList.toggle("active", view === "files");
 }
 
-function bytesToBase64(bytes) {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
 
 async function getSettings() {
-  const data = await storageGet([SETTINGS_KEY]);
+  const data = await storageGet([SETTINGS_KEY], "local");
   return data[SETTINGS_KEY] || {};
 }
 
 async function getOrCreateCryptoKeyRaw() {
-  const data = await storageGet([CRYPTO_KEY_KEY]);
+  const data = await storageGet([CRYPTO_KEY_KEY], "local");
   if (data[CRYPTO_KEY_KEY]) {
     return data[CRYPTO_KEY_KEY];
   }
@@ -227,7 +129,7 @@ async function getOrCreateCryptoKeyRaw() {
   const keyBytes = new Uint8Array(32);
   crypto.getRandomValues(keyBytes);
   const raw = bytesToBase64(keyBytes);
-  await storageSet({ [CRYPTO_KEY_KEY]: raw });
+  await storageSet({ [CRYPTO_KEY_KEY]: raw }, "local");
   return raw;
 }
 
@@ -255,6 +157,12 @@ function hasConfiguredApiKey(settings) {
   const hasEncrypted = Boolean(settings.apiKeyEncrypted && settings.apiKeyEncrypted.ciphertext && settings.apiKeyEncrypted.iv);
   const hasLegacyPlain = Boolean(settings.apiKey && settings.apiKey.trim());
   return hasEncrypted || hasLegacyPlain;
+}
+
+async function hasConfiguredApiKeyFromSources(settings) {
+  const sessionData = await storageGet([SESSION_SETTINGS_KEY], "session");
+  const hasSessionKey = Boolean(sessionData[SESSION_SETTINGS_KEY]?.apiKey);
+  return hasConfiguredApiKey(settings) || hasSessionKey;
 }
 
 function summarizeConfig(settings) {
@@ -315,12 +223,14 @@ async function refreshFillAvailability() {
 
 async function loadSettings() {
   const settings = await getSettings();
+  const hasKey = await hasConfiguredApiKeyFromSources(settings);
   ui.apiKey.value = "";
-  ui.apiKey.placeholder = hasConfiguredApiKey(settings)
+  ui.apiKey.placeholder = hasKey
     ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
     : t("placeholderApiKey", undefined, "sk-...");
   ui.model.value = settings.model || "gpt-4.1-mini";
   ui.language.value = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
+  ui.apiKeyStorageMode.value = settings.apiKeyStorageMode === "session" ? "session" : "persistent";
   ui.configSummary.textContent = summarizeConfig(settings);
   const savedStoreId = settings.vectorStoreId || "";
   const savedStoreName = settings.vectorStoreName || t("selectedFileDatabase", undefined, "Selected file database");
@@ -360,7 +270,7 @@ async function refreshVectorStores(selectedId) {
   const settings = await getSettings();
   const preferredId = selectedId || settings.vectorStoreId || "";
   const typedApiKey = ui.apiKey.value.trim();
-  const hasAnyApiKey = hasConfiguredApiKey(settings) || Boolean(typedApiKey);
+  const hasAnyApiKey = await hasConfiguredApiKeyFromSources(settings) || Boolean(typedApiKey);
 
   if (!hasAnyApiKey) {
     cachedVectorStores = [];
@@ -398,7 +308,7 @@ async function createVectorStore() {
   }
   const settings = await getSettings();
   const typedApiKey = ui.apiKey.value.trim();
-  const hasAnyApiKey = hasConfiguredApiKey(settings) || Boolean(typedApiKey);
+  const hasAnyApiKey = await hasConfiguredApiKeyFromSources(settings) || Boolean(typedApiKey);
   if (!hasAnyApiKey) {
     throw new Error(t("errApiKeyRequired", undefined, "OpenAI API key is required."));
   }
@@ -534,10 +444,21 @@ async function saveSettings() {
   const existingSettings = await getSettings();
   const typedApiKey = ui.apiKey.value.trim();
   const language = SUPPORTED_LANGUAGE_OVERRIDES.has(ui.language.value) ? ui.language.value : "default";
+  const apiKeyStorageMode = ui.apiKeyStorageMode.value === "session" ? "session" : "persistent";
 
   let apiKeyEncrypted = existingSettings.apiKeyEncrypted || null;
-  if (typedApiKey) {
+  if (typedApiKey && apiKeyStorageMode === "persistent") {
     apiKeyEncrypted = await encryptApiKey(typedApiKey);
+  }
+
+  if (apiKeyStorageMode === "session") {
+    apiKeyEncrypted = null;
+  }
+
+  if (typedApiKey && apiKeyStorageMode === "session") {
+    await storageSet({ [SESSION_SETTINGS_KEY]: { apiKey: typedApiKey } }, "session");
+  } else if (apiKeyStorageMode === "persistent") {
+    await storageRemove([SESSION_SETTINGS_KEY], "session");
   }
 
   const settings = {
@@ -545,19 +466,21 @@ async function saveSettings() {
     vectorStoreId: ui.vectorStoreId.value.trim(),
     vectorStoreName: (cachedVectorStores.find((store) => store.id === ui.vectorStoreId.value) || {}).name || "",
     model: ui.model.value || "gpt-4.1-mini",
-    language
+    language,
+    apiKeyStorageMode
   };
 
-  await storageSet({ [SETTINGS_KEY]: settings });
+  await storageSet({ [SETTINGS_KEY]: settings }, "local");
 
   ui.apiKey.value = "";
-  ui.apiKey.placeholder = hasConfiguredApiKey(settings)
+  ui.apiKey.placeholder = (await hasConfiguredApiKeyFromSources(settings))
     ? t("placeholderApiKeyStored", undefined, "Stored securely (leave blank to keep current)")
     : t("placeholderApiKey", undefined, "sk-...");
-  await loadLanguageMessages(language);
+  await i18n.loadLanguageMessages(language);
   applyI18nToDom();
   ui.model.value = settings.model || "gpt-4.1-mini";
   ui.language.value = language;
+  ui.apiKeyStorageMode.value = apiKeyStorageMode;
   updateStoreActionsState();
   ui.configSummary.textContent = summarizeConfig(settings);
 }
@@ -570,7 +493,7 @@ async function ensureConfigured() {
   await syncSelectedStoreToSettings();
   const settings = await getSettings();
 
-  if (!hasConfiguredApiKey(settings) || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
+  if (!(await hasConfiguredApiKeyFromSources(settings)) || !settings.vectorStoreId || !settings.vectorStoreId.trim()) {
     switchView("settings");
     throw new Error(t("errSetApiKeyAndDatabaseFirst", undefined, "Set API key and File Database in Configuration first."));
   }
@@ -579,18 +502,6 @@ async function ensureConfigured() {
 async function getActiveTab() {
   const tabs = await queryTabs({ active: true, currentWindow: true });
   return tabs[0];
-}
-
-function runtimeSendMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(response);
-    });
-  });
 }
 
 async function startFill() {
@@ -869,7 +780,7 @@ ui.saveBtn.addEventListener("click", async () => {
 ui.fillBtn.addEventListener("click", startFill);
 
 document.addEventListener("DOMContentLoaded", () => {
-  initializeLanguageOverride()
+  i18n.initializeLanguageOverride()
     .then(() => {
       applyI18nToDom();
       return loadSettings();
@@ -880,3 +791,7 @@ document.addEventListener("DOMContentLoaded", () => {
       updateStoreActionsState();
     });
 });
+
+
+
+

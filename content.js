@@ -1,4 +1,24 @@
-﻿let fieldMap = new Map();
+const SETTINGS_KEY = "aiFormFillerSettings";
+const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
+
+globalThis.__aiFormFillerContentLoaded = true;
+
+const {
+  storageGet,
+  runtimeSendMessage,
+  createTranslator
+} = self.AFFShared;
+
+const { isSensitiveFieldElement } = self.AFFFieldSafety;
+
+const i18n = createTranslator({
+  supportedLanguages: SUPPORTED_LANGUAGE_OVERRIDES,
+  settingsKey: SETTINGS_KEY
+});
+
+const t = i18n.t;
+
+let fieldMap = new Map();
 let uidCounter = 0;
 
 let hoverButton = null;
@@ -9,90 +29,9 @@ let statusTimer = null;
 let availabilityTimer = null;
 let availabilityObserver = null;
 let lastKnownHasForm = null;
-const SETTINGS_KEY = "aiFormFillerSettings";
-const SUPPORTED_LANGUAGE_OVERRIDES = new Set(["default", "en", "pt_BR", "es"]);
-let languageMessages = {};
 
-function applySubstitutions(template, substitutions) {
-  const values = Array.isArray(substitutions)
-    ? substitutions.map((value) => String(value))
-    : substitutions == null
-      ? []
-      : [String(substitutions)];
-
-  let result = String(template || "");
-  values.forEach((value, idx) => {
-    result = result.split(`$${idx + 1}`).join(value);
-  });
-  return result;
-}
-
-function getOverrideMessage(key, substitutions) {
-  const entry = languageMessages && languageMessages[key];
-  const message = entry && entry.message;
-  if (!message) {
-    return "";
-  }
-  return applySubstitutions(message, substitutions);
-}
-
-function storageGet(keys) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result || {});
-    });
-  });
-}
-
-async function loadLanguageMessages(language) {
-  const safeLanguage = SUPPORTED_LANGUAGE_OVERRIDES.has(language) ? language : "default";
-  if (safeLanguage === "default") {
-    languageMessages = {};
-    return;
-  }
-
-  try {
-    const url = chrome.runtime.getURL(`_locales/${safeLanguage}/messages.json`);
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Could not load locale file for ${safeLanguage}`);
-    }
-    languageMessages = await response.json();
-  } catch (_error) {
-    languageMessages = {};
-  }
-}
-
-async function initializeLanguageOverride() {
-  try {
-    const data = await storageGet([SETTINGS_KEY]);
-    const settings = data[SETTINGS_KEY] || {};
-    const preferred = SUPPORTED_LANGUAGE_OVERRIDES.has(settings.language) ? settings.language : "default";
-    await loadLanguageMessages(preferred);
-  } catch (_error) {
-    languageMessages = {};
-  }
-
-  if (hoverButton && !hoverButton.disabled) {
-    hoverButton.textContent = t("contentFillWithAi", undefined, "Fill with AI");
-  }
-}
-
-function t(key, substitutions, fallback) {
-  const override = getOverrideMessage(key, substitutions);
-  if (override) {
-    return override;
-  }
-
-  const message = chrome.i18n.getMessage(key, substitutions);
-  if (message) {
-    return message;
-  }
-  return fallback || key;
+function cleanText(v) {
+  return (v || "").replace(/\s+/g, " ").trim();
 }
 
 function isVisible(el) {
@@ -107,15 +46,11 @@ function shouldSkipInput(el) {
   }
 
   if (el.tagName.toLowerCase() === "input") {
-    const t = (el.type || "text").toLowerCase();
-    return ["hidden", "submit", "button", "reset", "file", "image", "range", "color"].includes(t);
+    const inputType = (el.type || "text").toLowerCase();
+    return ["hidden", "submit", "button", "reset", "file", "image", "range", "color"].includes(inputType);
   }
 
   return false;
-}
-
-function cleanText(v) {
-  return (v || "").replace(/\s+/g, " ").trim();
 }
 
 function getLabelText(el) {
@@ -182,16 +117,22 @@ function ensureFieldUid(el) {
 function getFieldDescriptor(el) {
   const tag = el.tagName.toLowerCase();
   const uid = ensureFieldUid(el);
+  const label = getLabelText(el);
+  const sensitivity = isSensitiveFieldElement(el, label);
 
   const descriptor = {
     uid,
     tag,
     type: (el.type || "").toLowerCase(),
+    autocomplete: cleanText(el.getAttribute("autocomplete")),
+    ariaLabel: cleanText(el.getAttribute("aria-label")),
     name: cleanText(el.getAttribute("name")),
     id: cleanText(el.id),
     placeholder: cleanText(el.getAttribute("placeholder")),
-    label: getLabelText(el),
-    required: Boolean(el.required)
+    label,
+    required: Boolean(el.required),
+    sensitive: sensitivity.sensitive,
+    sensitiveReason: sensitivity.reason
   };
 
   if (tag === "select") {
@@ -205,31 +146,18 @@ function getFieldDescriptor(el) {
   return descriptor;
 }
 
-function collectFields() {
+function collectFields(includeSensitive = false) {
   fieldMap = new Map();
 
   const elements = Array.from(document.querySelectorAll("input, textarea, select"))
     .filter((el) => !shouldSkipInput(el));
 
-  return elements.map((el) => getFieldDescriptor(el));
+  const descriptors = elements.map((el) => getFieldDescriptor(el));
+  return includeSensitive ? descriptors : descriptors.filter((field) => !field.sensitive);
 }
 
 function hasFillableForms() {
-  const elements = Array.from(document.querySelectorAll("input, textarea, select"));
-  return elements.some((el) => {
-    if (el.disabled || el.readOnly) {
-      return false;
-    }
-
-    if (el.tagName.toLowerCase() === "input") {
-      const t = (el.type || "text").toLowerCase();
-      if (["hidden", "submit", "button", "reset", "file", "image"].includes(t)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
+  return collectFields(false).length > 0;
 }
 
 function setNativeValue(el, value) {
@@ -246,10 +174,15 @@ function setNativeValue(el, value) {
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function fillField(uid, value) {
+function fillField(uid, value, allowSensitive) {
   const el = fieldMap.get(uid);
   if (!el) {
     return { ok: false, error: "Field not found in page context." };
+  }
+
+  const sensitivity = isSensitiveFieldElement(el, getLabelText(el));
+  if (sensitivity.sensitive && !allowSensitive) {
+    return { ok: false, error: "Refusing to fill sensitive field without explicit confirmation." };
   }
 
   const tag = el.tagName.toLowerCase();
@@ -325,55 +258,6 @@ function fillField(uid, value) {
   return { ok: true };
 }
 
-function runtimeSendMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(response);
-    });
-  });
-}
-
-function hasFillableForms() {
-  const selectors = [
-    "input",
-    "textarea",
-    "select",
-    "[contenteditable='true']",
-    "[role='textbox']"
-  ];
-
-  const elements = Array.from(document.querySelectorAll(selectors.join(",")));
-  return elements.some((el) => {
-    if (!(el instanceof HTMLElement)) {
-      return false;
-    }
-
-    if (el.closest("[aria-hidden='true']")) {
-      return false;
-    }
-
-    if ("disabled" in el && el.disabled) {
-      return false;
-    }
-    if ("readOnly" in el && el.readOnly) {
-      return false;
-    }
-
-    if (el.tagName.toLowerCase() === "input") {
-      const t = (el.type || "text").toLowerCase();
-      if (["hidden", "submit", "button", "reset", "file", "image"].includes(t)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
-}
-
 function notifyFormAvailability(force) {
   const hasForm = hasFillableForms();
   if (!force && hasForm === lastKnownHasForm) {
@@ -407,7 +291,7 @@ function initFormAvailabilityTracking() {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["type", "disabled", "readonly", "aria-hidden", "style", "class", "contenteditable", "role"]
+      attributeFilter: ["type", "disabled", "readonly", "aria-hidden", "style", "class", "contenteditable", "role", "autocomplete", "name"]
     });
   }
 
@@ -470,6 +354,20 @@ function ensureHoverControls() {
     }
 
     const descriptor = getFieldDescriptor(activeHoverField);
+    let allowSensitive = false;
+    if (descriptor.sensitive) {
+      allowSensitive = window.confirm(
+        t(
+          "contentConfirmSensitiveFill",
+          [descriptor.label || descriptor.name || descriptor.id || descriptor.type || "field"],
+          `This looks sensitive (${descriptor.sensitiveReason || "sensitive metadata"}). Fill "${descriptor.label || descriptor.name || descriptor.id || descriptor.type || "field"}" anyway?`
+        )
+      );
+      if (!allowSensitive) {
+        showFieldStatus(t("contentSensitiveFillCancelled", undefined, "Sensitive field fill cancelled."), true);
+        return;
+      }
+    }
 
     hoverButton.disabled = true;
     hoverButton.textContent = t("contentFilling", undefined, "Filling...");
@@ -478,7 +376,8 @@ function ensureHoverControls() {
     try {
       const response = await runtimeSendMessage({
         type: "FILL_SINGLE_FIELD",
-        field: descriptor
+        field: descriptor,
+        allowSensitive
       });
 
       if (!response || !response.ok) {
@@ -490,7 +389,7 @@ function ensureHoverControls() {
         return;
       }
 
-      const fillResult = fillField(descriptor.uid, response.value);
+      const fillResult = fillField(descriptor.uid, response.value, allowSensitive);
       if (!fillResult.ok) {
         throw new Error(fillResult.error || t("contentUnableApplyAnswer", undefined, "Unable to apply answer to field."));
       }
@@ -627,7 +526,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "GET_FORM_FIELDS") {
-    const fields = collectFields();
+    const fields = collectFields(Boolean(message.includeSensitive));
     sendResponse({ ok: true, fields });
     return;
   }
@@ -637,20 +536,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
 
-  if (message.type === "HAS_FILLABLE_FORMS") {
-    sendResponse({ ok: true, hasForm: hasFillableForms() });
-    return;
-  }
-
   if (message.type === "FILL_FORM_FIELD") {
-    const result = fillField(message.uid, message.value);
+    const result = fillField(message.uid, message.value, Boolean(message.allowSensitive));
     sendResponse(result);
   }
 });
 
 initInlineFillControl();
 initFormAvailabilityTracking();
-initializeLanguageOverride().catch(() => {
+i18n.initializeLanguageOverride().catch(() => {
   // ignore
 });
 
@@ -658,7 +552,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes || !changes[SETTINGS_KEY]) {
     return;
   }
-  initializeLanguageOverride().catch(() => {
+
+  i18n.initializeLanguageOverride().then(() => {
+    if (hoverButton && !hoverButton.disabled) {
+      hoverButton.textContent = t("contentFillWithAi", undefined, "Fill with AI");
+    }
+  }).catch(() => {
     // ignore
   });
 });
+

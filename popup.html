@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -377,6 +377,12 @@
       <label for="apiKey" data-i18n="labelApiKey">OpenAI API Key</label>
       <input id="apiKey" type="password" placeholder="sk-..." data-i18n-placeholder="placeholderApiKey" autocomplete="off" />
 
+      <label for="apiKeyStorageMode">API Key Storage</label>
+      <select id="apiKeyStorageMode">
+        <option value="persistent">Persistent (encrypted in local extension storage)</option>
+        <option value="session">Session only (cleared when browser session ends)</option>
+      </select>
+
       <div class="section">
         <div class="section-title" data-i18n="sectionCreateDatabase">Create Database</div>
         <div class="actions mt-0">
@@ -415,7 +421,7 @@
         <button class="primary" id="saveBtn" type="button" data-i18n="btnSave">Save</button>
       </div>
 
-      <div class="small" data-i18n="hintStoredLocally">Stored locally with Chrome extension storage.</div>
+      <div class="small">Security note: this protects against casual local exposure, but extension storage is not a hardware-secure vault.</div>
     </div>
   </div>
 
@@ -443,6 +449,8 @@
     </div>
   </div>
 
+  <script src="shared-utils.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
+
